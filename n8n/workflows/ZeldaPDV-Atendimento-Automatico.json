@@ -1,0 +1,832 @@
+{
+  "id": "5001",
+  "name": "ZeldaPDV - Atendimento Automático (Agente n8n)",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true
+  },
+  "nodes": [
+    {
+      "id": "w",
+      "name": "Webhook Atendimento",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        250,
+        400
+      ],
+      "webhookId": "zeldapdv-atendimento",
+      "parameters": {
+        "path": "zeldapdv-atendimento",
+        "httpMethod": "POST",
+        "responseMode": "lastNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "n1",
+      "name": "Extrair Dados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        400
+      ],
+      "parameters": {
+        "jsCode": "const root = $json || {};\nconst b = (root.body && typeof root.body === 'object') ? root.body : root;\nconst payload = (b.payload && typeof b.payload === 'object') ? { ...b, ...b.payload } : b;\nconst rawChatId = String(payload.chatId || payload.chat_id || payload.from || payload.to || b.chatId || '');\nconst phone = String(payload.phone || payload.from || rawChatId || '').replace(/@(c\\.us|lid)$/i, '').trim();\nconst text = String(payload.text || payload.body || payload.message || '').trim();\nconst name = String(payload.pushName || payload.customer_name || payload.customerName || payload.notifyName || '');\nconst channel = String(payload.channel || (rawChatId.endsWith('@lid') ? 'cloud_api' : 'waha'));\nreturn [{ json: { phone, text, name, chatId: rawChatId, channel } }];"
+      }
+    },
+    {
+      "id": "n2",
+      "name": "Consultar Estado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        760,
+        400
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://crm-zeldapdv:3000/api/v1/crm/chat-status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-zeldapdv-secret",
+              "value": "={{ $env.ZELDAPDV_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "={{ $json.phone }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "n2b",
+      "name": "Merge Estado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        400
+      ],
+      "parameters": {
+        "jsCode": "const http = ($json.body && typeof $json.body === 'object') ? $json.body : $json; return [{ json: { ...$('Extrair Dados').first().json, estado: http } }];"
+      }
+    },
+    {
+      "id": "sw1",
+      "name": "Roteamento",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        1240,
+        400
+      ],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "outputKey": "EM_HUMANO",
+              "conditions": {
+                "combinator": "or",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.estado.status }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "EM_HUMANO"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                }
+              }
+            },
+            {
+              "outputKey": "EM_IA",
+              "conditions": {
+                "combinator": "or",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.estado.status }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "EM_IA"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                }
+              }
+            },
+            {
+              "outputKey": "FINALIZADO",
+              "conditions": {
+                "combinator": "or",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.estado.status }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "FINALIZADO"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                }
+              }
+            },
+            {
+              "outputKey": "NOVO",
+              "conditions": {
+                "combinator": "or",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.estado.status }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "NOVO"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "parar",
+      "name": "Parar (Humano)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        200
+      ]
+    },
+    {
+      "id": "ck",
+      "name": "Check-in (reset EM_IA)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1500,
+        480
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://crm-zeldapdv:3000/api/v1/crm/conversations/check-in",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-zeldapdv-secret",
+              "value": "={{ $env.ZELDAPDV_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "={{ $json.phone }}"
+            },
+            {
+              "name": "customer_name",
+              "value": "={{ $json.name }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ckb",
+      "name": "Merge Checkin",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1740,
+        480
+      ],
+      "parameters": {
+        "jsCode": "const http = ($json.body && typeof $json.body === 'object') ? $json.body : $json; return [{ json: { ...$('Merge Estado').first().json, checkin: http } }];"
+      }
+    },
+    {
+      "id": "pg1",
+      "name": "Preparar Gemini 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        480
+      ],
+      "parameters": {
+        "jsCode": "const SYSTEM = \"Você é a IA de autoatendimento do restaurante Zelda PDV, atendendo clientes pelo WhatsApp.\\nRegras:\\n- Seja curto, cordial e responda sempre em português.\\n- Use as ferramentas para obter dados reais: get_menu_link (link do cardápio), check_order_status (status de pedido), register_sac_feedback (elogio/reclamação), transfer_to_human (falar com atendente humano).\\n- Se is_new_session for verdadeiro, cumprimente e ofereça o link do cardápio.\\n- Nunca invente preços ou itens; use get_menu_link para o cardápio real.\\n- Se o cliente pedir para falar com uma pessoa/atendente ou a situação exigir humano, use transfer_to_human.\\n- Ao final, não repita o cardápio completo; apenas o link ou o dado solicitado.\";\nconst functions = [{\"name\":\"get_menu_link\",\"description\":\"Retorna o link público do cardápio digital do restaurante.\",\"parameters\":{\"type\":\"OBJECT\",\"properties\":{},\"required\":[]}},{\"name\":\"check_order_status\",\"description\":\"Consulta o status do pedido mais recente de um cliente pelo telefone.\",\"parameters\":{\"type\":\"OBJECT\",\"properties\":{\"phone\":{\"type\":\"STRING\",\"description\":\"telefone do cliente\"}},\"required\":[\"phone\"]}},{\"name\":\"register_sac_feedback\",\"description\":\"Registra um elogio, reclamação ou sugestão (SAC) do cliente.\",\"parameters\":{\"type\":\"OBJECT\",\"properties\":{\"phone\":{\"type\":\"STRING\"},\"kind\":{\"type\":\"STRING\",\"enum\":[\"elogio\",\"reclamacao\",\"sugestao\"]},\"message\":{\"type\":\"STRING\"}},\"required\":[\"phone\",\"message\"]}},{\"name\":\"transfer_to_human\",\"description\":\"Transfere a conversa para um atendente humano (abre ticket no CRM).\",\"parameters\":{\"type\":\"OBJECT\",\"properties\":{\"phone\":{\"type\":\"STRING\"},\"customer_name\":{\"type\":\"STRING\"},\"message\":{\"type\":\"STRING\"}},\"required\":[\"phone\",\"message\"]}}];\nconst phone = $json.phone;\nconst text = $json.text || '';\nconst isNew = ($json.checkin && $json.checkin.is_new_session) === true;\nconst ctx = 'Telefone: ' + phone + '.' + (isNew ? ' Esta é uma NOVA conversa — cumprimente e ofereça o cardápio.' : '');\nconst contents = [{ role: 'user', parts: [{ text: ctx + '\\nMensagem do cliente: ' + text }] }];\nconst geminiBody = {\n  systemInstruction: { parts: [{ text: SYSTEM }] },\n  contents: contents,\n  generationConfig: { maxOutputTokens: 1024 },\n  tools: [{ functionDeclarations: functions }]\n};\nreturn [{ json: { ...$json, contents, geminiBody } }];"
+      }
+    },
+    {
+      "id": "g1",
+      "name": "Chamar Gemini 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2260,
+        480
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/{{ $env.GEMINI_MODEL }}:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyType": "json",
+        "body": "={{ $json.geminiBody }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "efc",
+      "name": "Extrair FuncCall",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2520,
+        480
+      ],
+      "parameters": {
+        "jsCode": "const up = $('Merge Checkin').first().json;\nconst g = ($json && $json.body && typeof $json.body === 'object') ? $json.body : ($json || {});\nconst cand = g.candidates && g.candidates[0];\nconst part = cand && cand.content && cand.content.parts && cand.content.parts[0];\nlet toolBranch = 'direct', toolName = null, toolArgs = null, funcCall = null, directText = null;\nif (part && part.functionCall) { funcCall = part.functionCall; toolName = funcCall.name; toolArgs = funcCall.args || {}; toolBranch = 'tool'; }\nelse if (part && part.text) { directText = part.text.trim(); }\nreturn [{ json: { ...up, toolBranch, toolName, toolArgs, funcCall, directText } }];"
+      }
+    },
+    {
+      "id": "sw2",
+      "name": "Tem Tool?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        2780,
+        480
+      ],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "outputKey": "tool",
+              "conditions": {
+                "combinator": "or",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.toolBranch }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "tool"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                }
+              }
+            },
+            {
+              "outputKey": "direct",
+              "conditions": {
+                "combinator": "or",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.toolBranch }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "direct"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "tm",
+      "name": "Tool: get_menu_link",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3040,
+        260
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://crm-zeldapdv:3000/api/v1/menu-link",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-zeldapdv-secret",
+              "value": "={{ $env.ZELDAPDV_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "to",
+      "name": "Tool: check_order_status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3040,
+        400
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=http://crm-zeldapdv:3000/api/v1/orders/status?phone={{ $json.phone }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-zeldapdv-secret",
+              "value": "={{ $env.ZELDAPDV_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ts",
+      "name": "Tool: register_sac_feedback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3040,
+        540
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://crm-zeldapdv:3000/api/v1/sac/tickets",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-zeldapdv-secret",
+              "value": "={{ $env.ZELDAPDV_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "={{ $json.phone }}"
+            },
+            {
+              "name": "kind",
+              "value": "={{ $json.toolArgs.kind }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $json.toolArgs.message }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "th",
+      "name": "Tool: transfer_to_human",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3040,
+        680
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://crm-zeldapdv:3000/api/v1/handoff",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-zeldapdv-secret",
+              "value": "={{ $env.ZELDAPDV_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "={{ $json.phone }}"
+            },
+            {
+              "name": "customer_name",
+              "value": "={{ $json.name }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $json.toolArgs.message }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "pg2",
+      "name": "Preparar Gemini 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        480
+      ],
+      "parameters": {
+        "jsCode": "const SYSTEM = \"Você é a IA de autoatendimento do restaurante Zelda PDV, atendendo clientes pelo WhatsApp.\\nRegras:\\n- Seja curto, cordial e responda sempre em português.\\n- Use as ferramentas para obter dados reais: get_menu_link (link do cardápio), check_order_status (status de pedido), register_sac_feedback (elogio/reclamação), transfer_to_human (falar com atendente humano).\\n- Se is_new_session for verdadeiro, cumprimente e ofereça o link do cardápio.\\n- Nunca invente preços ou itens; use get_menu_link para o cardápio real.\\n- Se o cliente pedir para falar com uma pessoa/atendente ou a situação exigir humano, use transfer_to_human.\\n- Ao final, não repita o cardápio completo; apenas o link ou o dado solicitado.\";\nconst fc = $('Extrair FuncCall').first().json.funcCall;\nconst toolName = $('Extrair FuncCall').first().json.toolName;\nconst toolResult = ($json && $json.body && typeof $json.body === 'object') ? $json.body : $json;\nconst base = $('Preparar Gemini 1').first().json.contents;\nconst contents = base.concat([\n  { role: 'model', parts: [{ functionCall: fc }] },\n  { role: 'user', parts: [{ functionResponse: { name: toolName, response: { result: JSON.stringify(toolResult) } } }] }\n]);\nconst geminiBody2 = { systemInstruction: { parts: [{ text: SYSTEM }] }, contents: contents, generationConfig: { maxOutputTokens: 1024 } };\nreturn [{ json: { ...$('Extrair FuncCall').first().json, geminiBody2 } }];"
+      }
+    },
+    {
+      "id": "g2",
+      "name": "Chamar Gemini 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3560,
+        480
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/{{ $env.GEMINI_MODEL }}:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyType": "json",
+        "body": "={{ $json.geminiBody2 }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "mr",
+      "name": "Montar Resposta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3820,
+        480
+      ],
+      "parameters": {
+        "jsCode": "const up = $('Extrair FuncCall').first().json;\nlet reply;\nif (up.directText && up.directText.trim()) { reply = up.directText.trim(); }\nelse {\n  const g2 = ($json && $json.body && typeof $json.body === 'object') ? $json.body : $json;\n  const cand = g2.candidates && g2.candidates[0];\n  const part = cand && cand.content && cand.content.parts && cand.content.parts[0];\n  reply = (part && part.text) ? part.text.trim() : 'Desculpe, não consegui processar agora. Um atendente vai te ajudar em instantes.';\n}\nreturn [{ json: { phone: up.phone, chatId: up.chatId, channel: up.channel, reply } }];"
+      }
+    },
+    {
+      "id": "wa",
+      "name": "Enviar WAHA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4080,
+        480
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.WAHA_API_URL }}/api/sendText",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Api-Key",
+              "value": "={{ $env.WAHA_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyType": "json",
+        "body": "={{ JSON.stringify({ session: $env.WAHA_SESSION, chatId: $json.chatId || ($json.phone + '@c.us'), text: $json.reply }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "resp",
+      "name": "Responder",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4340,
+        480
+      ],
+      "parameters": {
+        "jsCode": "const up = $('Montar Resposta').first().json;\nreturn [{ json: { ...up, waha: $json } }];"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Atendimento": {
+      "main": [
+        [
+          {
+            "node": "Extrair Dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair Dados": {
+      "main": [
+        [
+          {
+            "node": "Consultar Estado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar Estado": {
+      "main": [
+        [
+          {
+            "node": "Merge Estado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Estado": {
+      "main": [
+        [
+          {
+            "node": "Roteamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Roteamento": {
+      "main": [
+        [
+          {
+            "node": "Parar (Humano)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check-in (reset EM_IA)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check-in (reset EM_IA)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check-in (reset EM_IA)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check-in (reset EM_IA)": {
+      "main": [
+        [
+          {
+            "node": "Merge Checkin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Checkin": {
+      "main": [
+        [
+          {
+            "node": "Preparar Gemini 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Gemini 1": {
+      "main": [
+        [
+          {
+            "node": "Chamar Gemini 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chamar Gemini 1": {
+      "main": [
+        [
+          {
+            "node": "Extrair FuncCall",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair FuncCall": {
+      "main": [
+        [
+          {
+            "node": "Tem Tool?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem Tool?": {
+      "main": [
+        [
+          {
+            "node": "Tool: get_menu_link",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Montar Resposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool: get_menu_link": {
+      "main": [
+        [
+          {
+            "node": "Preparar Gemini 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool: check_order_status": {
+      "main": [
+        [
+          {
+            "node": "Preparar Gemini 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool: register_sac_feedback": {
+      "main": [
+        [
+          {
+            "node": "Preparar Gemini 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool: transfer_to_human": {
+      "main": [
+        [
+          {
+            "node": "Preparar Gemini 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Gemini 2": {
+      "main": [
+        [
+          {
+            "node": "Chamar Gemini 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chamar Gemini 2": {
+      "main": [
+        [
+          {
+            "node": "Montar Resposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Resposta": {
+      "main": [
+        [
+          {
+            "node": "Enviar WAHA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar WAHA": {
+      "main": [
+        [
+          {
+            "node": "Responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

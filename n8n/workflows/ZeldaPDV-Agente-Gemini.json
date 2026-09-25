@@ -1,0 +1,116 @@
+{
+    "active":  false,
+    "name":  "ZeldaPDV - Agente Gemini",
+    "connections":  {
+                        "ZeldaPDV - Webhook IA":  {
+                                                      "main":  [
+                                                                   [
+                                                                       {
+                                                                           "node":  "Preparar Gemini",
+                                                                           "type":  "main",
+                                                                           "index":  0
+                                                                       }
+                                                                   ]
+                                                               ]
+                                                  },
+                        "Preparar Gemini":  {
+                                                "main":  [
+                                                             [
+                                                                 {
+                                                                     "node":  "Chamar Gemini",
+                                                                     "type":  "main",
+                                                                     "index":  0
+                                                                 }
+                                                             ]
+                                                         ]
+                                            },
+                        "Chamar Gemini":  {
+                                              "main":  [
+                                                           [
+                                                               {
+                                                                   "node":  "Processar Gemini",
+                                                                   "type":  "main",
+                                                                   "index":  0
+                                                               }
+                                                           ]
+                                                       ]
+                                          }
+                    },
+    "settings":  {
+                     "executionOrder":  "v1"
+                 },
+    "nodes":  [
+                  {
+                      "id":  "zeldapdv-ai-webhook",
+                      "name":  "ZeldaPDV - Webhook IA",
+                      "parameters":  {
+                                         "path":  "zeldapdv-gemini",
+                                         "responseMode":  "lastNode",
+                                         "options":  {
+
+                                                     },
+                                         "httpMethod":  "POST"
+                                     },
+                      "webhookId":  "zeldapdv-gemini",
+                      "type":  "n8n-nodes-base.webhook",
+                      "position":  [
+                                       250,
+                                       300
+                                   ],
+                      "typeVersion":  2
+                  },
+                  {
+                      "id":  "zeldapdv-ai-prep",
+                      "name":  "Preparar Gemini",
+                      "parameters":  {
+                                         "jsCode":  "const root = $json || {};\nconst payload = (root.body \u0026\u0026 typeof root.body === \u0027object\u0027) ? root.body : root;\nconst text = String(payload.text || \u0027\u0027);\nconst menu = payload.menu || {};\nconst history = Array.isArray(payload.history) ? payload.history : [];\nconst key = String(payload.geminiKey || \u0027\u0027);\nconst model = String(payload.geminiModel || \u0027gemini-3.6-flash\u0027);\nfunction formatMoeda(v){ return \u0027R$ \u0027 + Number(v||0).toFixed(2).replace(\u0027.\u0027, \u0027,\u0027); }\nfunction formatMenuForPrompt(m){\n  const linhas = (m.pratos||[]).map(function(p){ return p.id + \u0027. \u0027 + p.title + \u0027 â€” \u0027 + formatMoeda(p.price); }).join(\u0027\\n\u0027);\n  const taxa = (m.taxasEntrega \u0026\u0026 m.taxasEntrega[0]) ? m.taxasEntrega[0].nome + \u0027: \u0027 + formatMoeda(m.taxasEntrega[0].valor) : \u0027\u0027;\n  return \u0027Restaurante: \u0027 + (m.restaurantName||\u0027Restaurante\u0027) + \u0027\\n\\nItens:\\n\u0027 + linhas + (taxa ? \u0027\\n\\nEntrega: \u0027 + taxa : \u0027\u0027);\n}\nconst menuText = formatMenuForPrompt(menu);\nconst SYSTEM = \u0027VocÃª Ã© a IA de autoatendimento de um restaurante, atendendo clientes pelo WhatsApp.\\nUse APENAS os itens do cardÃ¡pio (id, nome, preÃ§o). Nunca invente itens nem ids.\\n\\n\u0027 + menuText + \u0027\\n\\nResponda SEMPRE em JSON (sem markdown) com este formato:\\n{\\n  \"intent\": \"reply|menu|order|status|feedback|human|clarify\",\\n  \"reply\": \"resposta curta e acolhedora\",\\n  \"items\": [{\"id\": \u003cid\u003e, \"quantity\": \u003cqtde\u003e}],\\n  \"tipoEntrega\": \"entrega|retirada\",\\n  \"pagamento\": \"pix|cartao|dinheiro|carteira\",\\n  \"clienteNome\": \"nome\",\\n  \"endereco\": \"endereco\"\\n}\\n\\nRegras:\\n- Pedido em linguagem natural: extraia items com ids CERTOS e intent=\"order\".\\n- CardÃ¡pio: intent=\"menu\".\\n- Pedido/entrega/status: intent=\"status\" (nao extraia itens).\\n- Elogio/reclamacao: intent=\"feedback\".\\n- Falar com atendente/humano: intent=\"human\".\\n- Saudacao sem pedido: intent=\"reply\" (curta).\\n- Ambiguo: intent=\"clarify\" (pergunte).\\n- reply curto, maximo 3 frases, mencione valores em R$.\u0027;\nconst messages = [{ role: \u0027user\u0027, text: SYSTEM }];\nif (history.length) {\n  const tail = history.slice(-6);\n  messages.push({ role: \u0027user\u0027, text: \u0027Historico recente:\\n\u0027 + tail.map(function(h){ return (h.sender === \u0027customer\u0027 ? \u0027Cliente\u0027 : \u0027IA\u0027) + \u0027: \u0027 + h.text; }).join(\u0027\\n\u0027) + \u0027\\n\\nAgora responda considerando o historico e a ultima mensagem.\u0027 });\n}\nmessages.push({ role: \u0027user\u0027, text: \u0027Mensagem do cliente: \"\u0027 + text + \u0027\"\\n\\nDevolva o JSON conforme o formato.\u0027 });\nconst geminiBody = {\n  contents: messages.map(function(m){ return { role: m.role, parts: [{ text: m.text }] }; }),\n  generationConfig: { temperature: 0.4, maxOutputTokens: 1200, responseMimeType: \u0027application/json\u0027 }\n};\nreturn [{ json: {\n  geminiBodyStr: JSON.stringify(geminiBody),\n  apiUrl: \u0027https://generativelanguage.googleapis.com/v1beta/models/\u0027 + model + \u0027:generateContent?key=\u0027 + encodeURIComponent(key)\n} }];"
+                                     },
+                      "type":  "n8n-nodes-base.code",
+                      "position":  [
+                                       520,
+                                       300
+                                   ],
+                      "typeVersion":  2
+                  },
+                  {
+                      "id":  "zeldapdv-ai-gemini",
+                      "name":  "Chamar Gemini",
+                      "parameters":  {
+                                         "headerParameters":  [
+                                                                  {
+                                                                      "value":  "application/json",
+                                                                      "name":  "Content-Type"
+                                                                  }
+                                                              ],
+                                         "method":  "POST",
+                                         "contentType":  "raw",
+                                         "url":  "={{ $json.apiUrl }}",
+                                         "sendHeaders":  true,
+                                         "body":  "={{ $json.geminiBodyStr }}",
+                                         "options":  {
+
+                                                     },
+                                         "sendBody":  true
+                                     },
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "position":  [
+                                       820,
+                                       300
+                                   ],
+                      "typeVersion":  4.2
+                  },
+                  {
+                      "id":  "zeldapdv-ai-process",
+                      "name":  "Processar Gemini",
+                      "parameters":  {
+                                         "jsCode":  "const root = $json || {};\nconst data = (root.body \u0026\u0026 typeof root.body === \u0027object\u0027) ? root.body : root;\nfunction extractJson(t){\n  if (!t) return null;\n  const cleaned = String(t).replace(/^```(?:json)?\\s*|\\s*```$/g, \u0027\u0027).trim();\n  try { const p = JSON.parse(cleaned); return (p \u0026\u0026 typeof p === \u0027object\u0027) ? p : null; } catch (e) {\n    const m = cleaned.match(/\\{[\\s\\S]*\\}/); if (!m) return null;\n    try { return JSON.parse(m[0]); } catch (e2) { return null; }\n  }\n}\nconst cands = data.candidates;\nconst cand = Array.isArray(cands) ? cands[0] : null;\nconst t = cand \u0026\u0026 cand.content \u0026\u0026 Array.isArray(cand.content.parts) \u0026\u0026 cand.content.parts[0] ? cand.content.parts[0].text : null;\nif (!t) return [{ json: { intent: \u0027clarify\u0027, reply: \u0027NÃ£o consegui processar agora. Um atendente vai te ajudar em instantes.\u0027 } }];\nconst parsed = extractJson(t) || {};\nconst intent = String(parsed.intent || \u0027reply\u0027).toLowerCase();\nconst pagamentoMap = { pix: \u0027pix\u0027, cartao: \u0027cartao\u0027, dinheiro: \u0027dinheiro\u0027, carteira: \u0027carteira\u0027, fiado: \u0027carteira\u0027 };\nconst decision = {\n  intent: intent,\n  reply: String(parsed.reply || \u0027\u0027).trim(),\n  items: Array.isArray(parsed.items) ? parsed.items.map(function(i){ return { id: Number(i.id), quantity: Math.min(Math.max(Number(i.quantity) || 1, 1), 50) }; }) : undefined,\n  tipoEntrega: (parsed.tipoEntrega === \u0027retirada\u0027 || parsed.tipoEntrega === \u0027entrega\u0027) ? parsed.tipoEntrega : undefined,\n  pagamento: pagamentoMap[String(parsed.pagamento || \u0027\u0027).toLowerCase()],\n  clienteNome: String(parsed.clienteNome || \u0027\u0027).trim() || undefined,\n  endereco: String(parsed.endereco || \u0027\u0027).trim() || undefined,\n  fullText: t\n};\nreturn [{ json: decision }];"
+                                     },
+                      "type":  "n8n-nodes-base.code",
+                      "position":  [
+                                       1120,
+                                       300
+                                   ],
+                      "typeVersion":  2
+                  }
+              ]
+}

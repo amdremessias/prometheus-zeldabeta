@@ -1,0 +1,52 @@
+# Zelda PDV — reverse proxy
+# Arquivo GERADO pelo deploy/deploy.sh. Não edite manualmente.
+#
+# Placeholders (substituídos via sed):
+#   __DOMAIN__ __HTTP_PORT__ __HTTPS_PORT__ __UPSTREAM__
+#   __CERT__ __KEY__ __HSTS__
+
+server {
+    listen __HTTP_PORT__;
+    listen [::]:__HTTP_PORT__;
+    server_name __DOMAIN__ localhost;
+
+    # HTTP -> HTTPS
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen __HTTPS_PORT__ ssl;
+    listen [::]:__HTTPS_PORT__ ssl;
+    server_name __DOMAIN__ localhost;
+
+    ssl_certificate     __CERT__;
+    ssl_certificate_key __KEY__;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5:!3DES;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:ZELDAPDV_SSL:10m;
+    ssl_session_timeout 10m;
+
+    __HSTS__
+
+    # Imagens de produtos / fotos
+    client_max_body_size 25m;
+
+    # Headers de segurança
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+
+    location / {
+        proxy_pass http://__UPSTREAM__;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 10s;
+    }
+}

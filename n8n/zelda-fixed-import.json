@@ -1,0 +1,687 @@
+{
+  "updatedAt": "2026-08-15T03:34:58.632Z",
+  "createdAt": "2026-08-13T20:58:05.024Z",
+  "id": "ff9fbbf5-7db0-42cd-aecb-8b7ded264f4a",
+  "name": "Zelda PDV - Atendimento WPP FINAL LIVE",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "waha-message-v7-final-live",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "waha---mensagem-recebida",
+      "webhookId": "zelda-waha-message-v6",
+      "name": "WAHA - Mensagem recebida",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const root = $json ?? {};\nconst bodyRaw = root.body ?? root;\nconst body = (typeof bodyRaw === 'string') ? (JSON.parse(bodyRaw) || {}) : bodyRaw;\nconst eventValue = root.event ?? body.event ?? '';\nconst eventName = typeof eventValue === 'string' ? eventValue.toLowerCase() : '';\nif (eventName === 'session.status') return [];\nconst event = (eventValue && typeof eventValue === 'object') ? eventValue : body;\nconst msg = (event.payload && typeof event.payload === 'object') ? event.payload : ((event.message && typeof event.message === 'object') ? event.message : event);\nconst store = $getWorkflowStaticData('global');\nstore.seen = store.seen || {};\nconst serialized = JSON.stringify(root);\nconst fallbackChat = (serialized.match(/\\d{10,15}@(c\\\\.us|lid)/i) || [])[0] || '';\nconst rawChatId = String(msg.from ?? msg.chatId ?? msg.to ?? body.from ?? body.chatId ?? fallbackChat).trim();\nconst phone = rawChatId.replace(/@(c\\.us|lid)$/i, '');\nconst fallbackText = (serialized.match(/\\\"(?:body|text|content)\\\"\\s*:\\s*\\\"([^\\\"]+)/i) || [])[1] || '';\nconst text = String(msg.body ?? msg.text ?? msg.content ?? body.body ?? body.text ?? fallbackText).trim();\nconst customer_name = String(msg.pushName ?? msg.notifyName ?? body.pushName ?? '');\nconst dedupeKey = String(msg.id ?? msg._data?.id?.id ?? body.id ?? '').trim();\nif (dedupeKey && store.seen[dedupeKey]) return [];\nif (msg.fromMe === true || body.fromMe === true || body.from_me === true) return [];\nif (!phone || !text) return [];\nif (dedupeKey) store.seen[dedupeKey] = Date.now();\nreturn [{ json: { phone, text, customer_name, chat_id: rawChatId, raw: body } }];\n"
+      },
+      "id": "normalizar-mensagem",
+      "name": "Normalizar mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://zeldapdv.internal.lab/api/whatsapp/inbound",
+        "sendHeaders": true,
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { phone: $json.phone, chat_id: $json.chat_id, text: $json.text, channel: ($json.channel || 'waha'), event_id: $json.event_id } }}",
+        "options": {
+          "timeout": 8000,
+          "allowUnauthorizedCerts": true
+        },
+        "contentType": "json",
+        "authentication": "none",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-wpp-inbound-token",
+              "value": "e6bfc7bb3eeb4759bac3ffaf7b09636b"
+            }
+          ]
+        }
+      },
+      "id": "crm---registrar-entrada-e-pausar-humano",
+      "name": "CRM - Registrar entrada e pausar humano",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{String($json.human)}}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {
+          "allowUnauthorizedCerts": true
+        }
+      },
+      "id": "atendimento-humano?",
+      "name": "Atendimento humano?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://waha.zeldapdv.internal.lab/api/sendText",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "67fe4b0e48bf4b7c895bc5ba36645f98"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { session: 'session_zeldapdv', chatId: String($json.chat_id || (($json.body && $json.body.chat_id)) || $(\"Normalizar mensagem\").item.json.chat_id), text: String($json.reply || (($json.body && $json.body.reply)) || $json.text || 'Não consegui processar sua mensagem.') } }}",
+        "options": {
+          "allowUnauthorizedCerts": true
+        },
+        "requestMethod": "POST",
+        "jsonParameters": true,
+        "bodyParametersJson": "={{ { session: \"session_zeldapdv\", chatId: (String($(\"Normalizar mensagem\").item.json.phone) + \"@c.us\"), text: $json.reply } }}",
+        "headerParametersJson": "={{ JSON.stringify({ \"X-Api-Key\": \"67fe4b0e48bf4b7c895bc5ba36645f98\" }) }}",
+        "authentication": "none"
+      },
+      "id": "avisar-transfer?ncia",
+      "name": "Avisar transfer?ncia",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('Normalizar mensagem').item.json;\nconst store = $getWorkflowStaticData('global');\nstore.sessions = store.sessions || {};\nconst key = input.phone;\nlet s = store.sessions[key];\nif (!s || s.closed) s = { step: 'menu', items: [], mode: '', name: '', address: '', payment: '', observations: '', order_number: '' };\nconst text = String(input.text || '').trim();\nconst low = text.toLowerCase();\nconst menu = 'Ola! Bem-vindo ao Zelda PDV. 1-Pedido 2-Status 3-Cardapio 4-Feedback 5-Humano';\nconst out = { ...input, action: 'reply', reply: menu, items: s.items || [], mode: s.mode || '', name: s.name || '', address: s.address || '', payment: s.payment || '', observations: s.observations || '' };\nif (!text) return [{ json: out }];\nif (s.step === 'human') { out.action = 'human'; out.reply = 'Atendimento humano ativo. Aguarde uma mensagem da equipe.'; store.sessions[key] = s; return [{ json: out }]; }\nif (s.step === 'menu') {\n  if (/^(1|pedido|fazer pedido)\\b/.test(low)) { s.step = 'mode'; out.action = 'reply'; out.reply = 'Sera entrega ou retirada no local? Responda entrega ou retirada.'; }\n  else if (/^(2|status|consultar)\\b/.test(low)) { s.step = 'status'; out.action = 'status'; out.reply = 'Informe o numero do pedido.'; }\n  else if (/^(3|cardapio|cardapio digital|menu)\\b/.test(low)) { out.action = 'reply'; out.reply = 'Cardapio digital: Zelda Burger R$ 28,90; X-Bacon Zelda R$ 34,90; Refrigerante Lata R$ 6,50. Para fazer pedido, responda 1.'; }\n  else if (/^(4|elogio|reclamacao|feedback)\\b/.test(low)) { s.step = 'feedback'; out.action = 'feedback'; out.reply = 'Envie seu elogio ou reclamacao em uma mensagem.'; }\n  else if (/^(5|humano|atendente)\\b/.test(low)) { s.step = 'human'; out.action = 'human'; out.reply = 'Vou transferir voce para um atendente humano. Informe o assunto.'; }\n  else out.action = 'reply';\n} else if (s.step === 'mode') {\n  if (/entrega|delivery/.test(low)) { s.mode = 'delivery'; s.step = 'name'; out.reply = 'Informe seu nome completo.'; }\n  else if (/retirada|retirar|local|pickup/.test(low)) { s.mode = 'takeout'; s.step = 'name'; out.reply = 'Informe seu nome completo.'; }\n  else out.reply = 'Responda entrega ou retirada.';\n  out.action = 'reply';\n} else if (s.step === 'name') { s.name = text; s.step = s.mode === 'delivery' ? 'address' : 'payment'; out.action = 'reply'; out.reply = s.mode === 'delivery' ? 'Informe o endereco completo para entrega.' : 'Qual a forma de pagamento: dinheiro, cartao, pix ou Carteira/Fiado?'; }\nelse if (s.step === 'address') { s.address = text; s.step = 'payment'; out.action = 'reply'; out.reply = 'Qual a forma de pagamento: dinheiro, cartao, pix ou Carteira/Fiado?'; }\nelse if (s.step === 'payment') { if (!/dinheiro|cartao|cartão|pix|fiado|carteira/.test(low)) out.reply = 'Escolha dinheiro, cartao, pix ou Carteira/Fiado.'; else { s.payment = /fiado|carteira/.test(low) ? 'carteira_fiado' : /pix/.test(low) ? 'pix' : /cart/.test(low) ? 'cartao' : 'dinheiro'; s.step = 'items'; out.action = 'reply'; out.reply = 'Informe os produtos e quantidades. Exemplo: 1 Zelda Burger e 2 Refrigerante Lata.'; } }\nelse if (s.step === 'items') { const catalog = [{id:1001,title:'Zelda Burger',price:28.9},{id:1002,title:'X-Bacon Zelda',price:34.9},{id:1003,title:'Refrigerante Lata',price:6.5}]; const items = []; for (const p of catalog) { if (low.includes(p.title.toLowerCase())) { const m = low.match(new RegExp('(\\\\d+)\\\\s*(?:x\\\\s*)?' + p.title.toLowerCase().replace(/[.*+?^${}()|[\\\\]\\\\]/g,'\\\\$&'),'i')); items.push({ ...p, quantity: m ? Math.min(Number(m[1]),20) : 1 }); } } if (!items.length) { out.action = 'reply'; out.reply = 'Nao identifiquei os produtos. Use Zelda Burger, X-Bacon Zelda ou Refrigerante Lata.'; } else { s.items = items; s.step = 'observations'; out.action = 'reply'; out.reply = 'Ha alguma observacao? Exemplo: sem cebola, gelo e limao. Se nao houver, responda nao.'; } }\nelse if (s.step === 'observations') { s.observations = /^(nao|não|nenhuma|sem observacao|sem observacoes)$/.test(low) ? '' : text; s.step = 'confirm'; out.action = 'create_order'; out.reply = 'Pedido pronto para registro. Vou enviar os dados ao Zelda PDV.'; out.order_payload = { phone: input.phone, customer_name: s.name, address: s.address, mode: s.mode, payment: s.payment, items: s.items, observations: s.observations, channel: 'waha' }; }\nelse if (s.step === 'status') { out.action = 'status'; out.order_number = text.replace(/[^0-9A-Za-z-]/g,''); out.reply = 'Vou consultar o status do pedido.'; s.step = 'menu'; }\nelse if (s.step === 'feedback') { out.action = 'feedback'; out.feedback_message = text; out.feedback_type = /reclam|problema|ruim/.test(low) ? 'reclamacao' : 'elogio'; out.reply = 'Obrigado pelo retorno. Seu feedback foi registrado.'; s.step = 'menu'; }\nelse if (s.step === 'confirm') { out.action = 'create_order'; out.order_payload = { phone: input.phone, customer_name: s.name, address: s.address, mode: s.mode, payment: s.payment, items: s.items, observations: s.observations, channel: 'waha' }; }\nstore.sessions[key] = s;\nreturn [{ json: { ...out, state: s.step } }];\n"
+      },
+      "id": "roteador-transacional",
+      "name": "Roteador transacional",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "options": {
+          "allowUnauthorizedCerts": true
+        },
+        "output": "={{ ({ reply: 0, menu: 0, order: 1, create_order: 1, status: 2, feedback: 3, human: 4 }[$json.action] -as [int]) }}",
+        "mode": "expression",
+        "numberOutputs": 5
+      },
+      "id": "escolher-a??o",
+      "name": "Escolher a??o",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://waha.zeldapdv.internal.lab/api/sendText",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "=67fe4b0e48bf4b7c895bc5ba36645f98"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { session: \"session_zeldapdv\", chatId: String($json.chat_id || $json.chatId || $json.from || \"\"), text: String($json.reply || $json.text || \"\") } }}",
+        "options": {
+          "allowUnauthorizedCerts": true,
+          "timeout": 8000
+        },
+        "requestMethod": "POST",
+        "jsonParameters": true,
+        "bodyParametersJson": "={{ { session: 'session_zeldapdv', chatId: String($json.chat_id || $json.raw?.payload?.from || $json.raw?.payload?.chatId || $json.raw?.from || (($json.phone || '').includes('@') ? $json.phone : (($json.phone || '') + '@c.us'))), text: String($json.reply || $json.text || 'N�o consegui processar sua mensagem. Tente novamente.') } }}",
+        "headerParametersJson": "={{ JSON.stringify({ \"X-Api-Key\": \"67fe4b0e48bf4b7c895bc5ba36645f98\" }) }}",
+        "authentication": "none"
+      },
+      "id": "waha---responder-menu",
+      "name": "WAHA - Responder menu",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://zeldapdv.internal.lab/api/whatsapp/order",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-crm-webhook-secret",
+              "value": "e6bfc7bb3eeb4759bac3ffaf7b09636b"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { chat_id: ($json.chat_id || $(\"Normalizar mensagem\").item.json.chat_id),  slug: 'sandbox', cliente: $json.name, telefone: $json.phone, endereco: $json.mode === 'delivery' ? $json.address : 'Retirada no local', pagamento: $json.payment, taxaEntregaId: $json.mode === 'delivery' ? 1 : null, itens: $json.items } }}",
+        "options": {
+          "allowUnauthorizedCerts": true
+        },
+        "authentication": "none"
+      },
+      "id": "crm---criar-pedido-pendente",
+      "name": "CRM - Criar pedido pendente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r=$json.body || $json; const id=r.order?.id || r.id || r.orderId || ''; const total=Number(r.order?.total ?? r.total ?? 0).toFixed(2).replace('.',','); return [{json:{...$('Roteador transacional').item.json,order_id:id,total,reply:id?`Pedido registrado com sucesso: #${id}. Total R$ ${total}. Ele ficar? pendente de aprova??o para a cozinha.`:'N?o foi poss?vel registrar o pedido agora.'}}];"
+      },
+      "id": "formatar-confirma??o-do-pedido",
+      "name": "Formatar confirma??o do pedido",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://waha.zeldapdv.internal.lab/api/sendText",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "=67fe4b0e48bf4b7c895bc5ba36645f98"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { session: \"session_zeldapdv\", chatId: String($json.chat_id || $json.chatId || $json.from || \"\"), text: String($json.reply || $json.text || \"\") } }}",
+        "options": {
+          "allowUnauthorizedCerts": true,
+          "timeout": 8000
+        },
+        "requestMethod": "POST",
+        "jsonParameters": true,
+        "bodyParametersJson": "={{ { session: 'session_zeldapdv', chatId: String($json.chat_id || $json.raw?.payload?.from || $json.raw?.payload?.chatId || $json.raw?.from || (($json.phone || '').includes('@') ? $json.phone : (($json.phone || '') + '@c.us'))), text: String($json.reply || $json.text || 'N�o consegui processar sua mensagem. Tente novamente.') } }}",
+        "headerParametersJson": "={{ JSON.stringify({ \"X-Api-Key\": \"67fe4b0e48bf4b7c895bc5ba36645f98\" }) }}",
+        "authentication": "none"
+      },
+      "id": "waha---confirmar-pedido",
+      "name": "WAHA - Confirmar pedido",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://zeldapdv.internal.lab/api/whatsapp/orders",
+        "options": {
+          "allowUnauthorizedCerts": true
+        },
+        "authentication": "none"
+      },
+      "id": "crm---consultar-pedidos",
+      "name": "CRM - Consultar pedidos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$('Roteador transacional').item.json; const orders=$json.orders||[]; const o=orders.find(x=>Number(x.id)===Number(input.order_id)); let reply=o?`O pedido #${o.id} est? com status ${o.status==='pendente'?'pendente de aprova??o':o.status==='em_preparo'?'em preparo':o.status==='concluido'?'conclu?do':'cancelado'}.`:`N?o encontrei o pedido #${input.order_id}.`; return [{json:{...input,reply}}];"
+      },
+      "id": "formatar-status",
+      "name": "Formatar status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://waha.zeldapdv.internal.lab/api/sendText",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "=67fe4b0e48bf4b7c895bc5ba36645f98"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { session: \"session_zeldapdv\", chatId: String($json.chat_id || $json.chatId || $json.from || \"\"), text: String($json.reply || $json.text || \"\") } }}",
+        "options": {
+          "allowUnauthorizedCerts": true,
+          "timeout": 8000
+        },
+        "requestMethod": "POST",
+        "jsonParameters": true,
+        "bodyParametersJson": "={{ { session: 'session_zeldapdv', chatId: String($json.chat_id || $json.raw?.payload?.from || $json.raw?.payload?.chatId || $json.raw?.from || (($json.phone || '').includes('@') ? $json.phone : (($json.phone || '') + '@c.us'))), text: String($json.reply || $json.text || 'N�o consegui processar sua mensagem. Tente novamente.') } }}",
+        "headerParametersJson": "={{ JSON.stringify({ \"X-Api-Key\": \"67fe4b0e48bf4b7c895bc5ba36645f98\" }) }}",
+        "authentication": "none"
+      },
+      "id": "waha---responder-status",
+      "name": "WAHA - Responder status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://zeldapdv.internal.lab/api/whatsapp/feedback",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-wpp-inbound-token",
+              "value": "e6bfc7bb3eeb4759bac3ffaf7b09636b"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { chat_id: ($json.chat_id || $(\"Normalizar mensagem\").item.json.chat_id),  phone: $json.phone, customer_name: $json.customer_name, type: $json.feedback_type, message: $json.feedback_message } }}",
+        "options": {
+          "allowUnauthorizedCerts": true
+        },
+        "authentication": "none"
+      },
+      "id": "crm---registrar-feedback",
+      "name": "CRM - Registrar feedback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://waha.zeldapdv.internal.lab/api/sendText",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "=67fe4b0e48bf4b7c895bc5ba36645f98"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { session: \"session_zeldapdv\", chatId: String($json.chat_id || $json.chatId || $json.from || \"\"), text: String($json.reply || $json.text || \"\") } }}",
+        "options": {
+          "allowUnauthorizedCerts": true,
+          "timeout": 8000
+        },
+        "requestMethod": "POST",
+        "jsonParameters": true,
+        "bodyParametersJson": "={{ { session: 'session_zeldapdv', chatId: (String($json.phone ?? '').replace(/@.*$/, '') + '@c.us'), text: String($json.reply ?? $json.text ?? 'Ol?! Bem-vindo ao Zelda PDV. Escolha uma op??o do menu.') } }}",
+        "headerParametersJson": "={{ JSON.stringify({ \"X-Api-Key\": \"67fe4b0e48bf4b7c895bc5ba36645f98\" }) }}",
+        "authentication": "none"
+      },
+      "id": "waha---confirmar-feedback",
+      "name": "WAHA - Confirmar feedback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://zeldapdv.internal.lab/api/whatsapp/human",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-wpp-inbound-token",
+              "value": "e6bfc7bb3eeb4759bac3ffaf7b09636b"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { chat_id: ($json.chat_id || $(\"Normalizar mensagem\").item.json.chat_id),  phone: $json.phone, text: $json.text, channel: \"waha\" } }}",
+        "options": {
+          "allowUnauthorizedCerts": true
+        },
+        "requestMethod": "POST",
+        "jsonParameters": true,
+        "bodyParametersJson": "={{ { phone: String($(\"Normalizar mensagem\").item.json.phone), text: String($(\"Normalizar mensagem\").item.json.text), channel: \"waha\" } }}",
+        "headerParametersJson": "={{ JSON.stringify({ \"x-wpp-inbound-token\": \"e6bfc7bb3eeb4759bac3ffaf7b09636b\" }) }}",
+        "authentication": "none"
+      },
+      "id": "d934e9e4-6cd2-41e3-ae8f-260f6295fd69",
+      "name": "CRM - Abrir ChatWPP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const root=$json||{};let source=root.body;if(typeof source===\"string\"){try{source=JSON.parse(source)}catch{source=null}};if(!source||typeof source!==\"object\")source=root;const action=source.action||root.action||\"reply\";const reply=source.reply||root.reply||source.text||root.text||\"Não consegui processar sua mensagem.\";const chat_id=source.chat_id||root.chat_id||root.chatId||root.from||\"\";return [{json:{...root,...source,action,reply,chat_id}}];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "ensure-action",
+      "name": "Garantir action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        300
+      ],
+      "notesInFlow": false,
+      "alwaysOutputData": false,
+      "executeOnce": false,
+      "retryOnFail": false,
+      "maxTries": 1,
+      "waitBetweenTries": 0
+    }
+  ],
+  "connections": {
+    "WAHA - Mensagem recebida": {
+      "main": [
+        [
+          {
+            "node": "Normalizar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar mensagem": {
+      "main": [
+        [
+          {
+            "node": "CRM - Registrar entrada e pausar humano",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM - Registrar entrada e pausar humano": {
+      "main": [
+        [
+          {
+            "node": "Atendimento humano?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atendimento humano?": {
+      "main": [
+        [
+          {
+            "node": "CRM - Abrir ChatWPP",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Roteador transacional",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Roteador transacional": {
+      "main": [
+        [
+          {
+            "node": "Garantir action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escolher a??o": {
+      "main": [
+        [
+          {
+            "node": "WAHA - Responder menu",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CRM - Criar pedido pendente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CRM - Consultar pedidos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CRM - Registrar feedback",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Avisar transfer?ncia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM - Criar pedido pendente": {
+      "main": [
+        [
+          {
+            "node": "Formatar confirma??o do pedido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatar confirma??o do pedido": {
+      "main": [
+        [
+          {
+            "node": "WAHA - Confirmar pedido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM - Consultar pedidos": {
+      "main": [
+        [
+          {
+            "node": "Formatar status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatar status": {
+      "main": [
+        [
+          {
+            "node": "WAHA - Responder status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM - Registrar feedback": {
+      "main": [
+        [
+          {
+            "node": "WAHA - Confirmar feedback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM - Abrir ChatWPP": {
+      "main": [
+        [
+          {
+            "node": "Avisar transfer?ncia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Garantir action": {
+      "main": [
+        [
+          {
+            "node": "Escolher a??o",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "e4e273b7-e4a7-4f12-a41a-f96699a7d551",
+  "activeVersionId": "4373dc0f-3ec8-433c-81b4-3ea1fb2ae5f3",
+  "versionCounter": 55,
+  "triggerCount": 1,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-08-13T20:58:05.032Z",
+      "createdAt": "2026-08-13T20:58:05.032Z",
+      "role": "workflow:owner",
+      "workflowId": "ff9fbbf5-7db0-42cd-aecb-8b7ded264f4a",
+      "projectId": "j2pvnvtilUULpg9o",
+      "project": {
+        "updatedAt": "2026-08-13T02:33:06.31Z",
+        "createdAt": "2026-08-13T00:13:31.448Z",
+        "id": "j2pvnvtilUULpg9o",
+        "name": "A L Messias <messias.consultoria@yahoo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "aa50b3c5-e59a-4bf8-b675-b44804b5f8d1"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": null,
+    "description": null
+  }
+}

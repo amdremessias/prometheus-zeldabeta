@@ -1,0 +1,232 @@
+{
+  "name": "Zelda PDV - Atendimento Pedidos WPP",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "zelda-wpp/inbound",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "waha-webhook",
+      "name": "WAHA - Mensagem recebida",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -900,
+        0
+      ],
+      "webhookId": "zelda-wpp-inbound"
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = $json.body || $json;\nconst event = p.event || p;\nconst msg = event.payload || event.message || event;\nconst phone = msg.from || msg.chatId || p.from || '';\nconst text = String(msg.body || msg.text || p.body || p.text || '').trim();\nreturn [{ json: { phone, text, customer_name: msg.pushName || p.pushName || '', raw: p } }];"
+      },
+      "id": "normalize",
+      "name": "Normalizar mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.CRM_API_URL + '/api/whatsapp/inbound'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-wpp-inbound-token",
+              "value": "={{$env.WPP_INBOUND_TOKEN}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { phone: $json.phone, message: $json.text, customer_name: $json.customer_name, intent: ['humano','atendente','pessoa'].some(x => $json.text.toLowerCase().includes(x)) ? 'human' : 'automation' } }}",
+        "options": {}
+      },
+      "id": "crm-inbound",
+      "name": "CRM - Verificar ChatWPP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -430,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json.handled}}",
+              "rightValue": "human",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        }
+      },
+      "id": "human-if",
+      "name": "Atendimento humano?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -180,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.WAHA_API_URL + '/api/sendText'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "={{$env.WAHA_API_KEY}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { chatId: $('Normalizar mensagem').item.json.phone, text: 'Seu atendimento foi transferido para um atendente humano. Aguarde um momento, por favor.' } }}",
+        "options": {}
+      },
+      "id": "human-reply",
+      "name": "WAHA - Avisar transferência",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        70,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const t = $('Normalizar mensagem').item.json.text.toLowerCase();\nlet reply = 'Olá! Bem-vindo ao Zelda PDV. Escolha uma opção:\\n1 - Fazer pedido\\n2 - Consultar pedido\\n3 - Ver cardápio\\n4 - Elogio ou reclamação\\n5 - Falar com atendente humano';\nif (/^[1]$|pedido/.test(t)) reply = 'Vamos fazer seu pedido. Informe se será entrega ou retirada no local.';\nelse if (/^[2]$|consultar|status/.test(t)) reply = 'Informe o número do pedido para consultar o status.';\nelse if (/^[3]$|cardápio|menu/.test(t)) reply = 'Nosso cardápio digital ainda está em preparação. Em breve estará disponível.';\nelse if (/^[4]$|elogio|reclamação|reclamacao/.test(t)) reply = 'Envie seu elogio ou reclamação em uma única mensagem para registrarmos no CRM.';\nreturn [{json:{...$('Normalizar mensagem').item.json, reply}}];"
+      },
+      "id": "menu",
+      "name": "Menu e próxima etapa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        70,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.WAHA_API_URL + '/api/sendText'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "={{$env.WAHA_API_KEY}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { chatId: $json.phone, text: $json.reply } }}",
+        "options": {}
+      },
+      "id": "automation-reply",
+      "name": "WAHA - Responder automação",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        340,
+        80
+      ]
+    }
+  ],
+  "connections": {
+    "WAHA - Mensagem recebida": {
+      "main": [
+        [
+          {
+            "node": "Normalizar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar mensagem": {
+      "main": [
+        [
+          {
+            "node": "CRM - Verificar ChatWPP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM - Verificar ChatWPP": {
+      "main": [
+        [
+          {
+            "node": "Atendimento humano?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atendimento humano?": {
+      "main": [
+        [
+          {
+            "node": "WAHA - Avisar transferência",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Menu e próxima etapa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Menu e próxima etapa": {
+      "main": [
+        [
+          {
+            "node": "WAHA - Responder automação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "versionId": "zelda-wpp-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": [],
+  "id": "zelda-atendimento-pedidos-wpp"
+}

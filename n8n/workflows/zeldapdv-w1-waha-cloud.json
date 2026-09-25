@@ -1,0 +1,659 @@
+{
+  "id": "10",
+  "name": "ZeldaPDV - W1 WAHA + Cloud LLM",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true
+  },
+  "nodes": [
+    {
+      "id": "w",
+      "name": "Webhook Atendimento",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        250,
+        400
+      ],
+      "webhookId": "zeldapdv-waha-cloud",
+      "parameters": {
+        "path": "zeldapdv-waha-cloud",
+        "httpMethod": "POST",
+        "responseMode": "lastNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "n1",
+      "name": "Extrair Dados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        400
+      ],
+      "parameters": {
+        "jsCode": "const root = $json || {};\nconst b = (root.body && typeof root.body === 'object') ? root.body : root;\nconst payload = (b.payload && typeof b.payload === 'object') ? Object.assign({}, b, b.payload) : b;\nconst rawChatId = String(payload.chatId || payload.chat_id || payload.from || payload.to || b.chatId || '');\nconst phone = String(payload.phone || payload.from || rawChatId || '').replace(/@(c\\.us|lid)$/i, '').trim();\nconst text = String(payload.text || payload.body || payload.message || '').trim();\nconst name = String(payload.pushName || payload.customer_name || payload.customerName || payload.notifyName || '');\nconst channel = String(payload.channel || (rawChatId.endsWith('@lid') ? 'cloud_api' : 'waha'));\nreturn [{ json: { phone: phone, text: text, name: name, chatId: rawChatId, channel: channel } }];"
+      }
+    },
+    {
+      "id": "n2",
+      "name": "Consultar Estado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        760,
+        400
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://crm-zeldapdv:3000/api/v1/crm/chat-status",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-zeldapdv-secret",
+              "value": "={{ $env.ZELDAPDV_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "={{ $json.phone }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "n2b",
+      "name": "Merge Estado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        400
+      ],
+      "parameters": {
+        "jsCode": "const http = ($json.body && typeof $json.body === 'object') ? $json.body : $json;\nreturn [{ json: Object.assign({}, $('Extrair Dados').first().json, { estado: http }) }];"
+      }
+    },
+    {
+      "id": "sw1",
+      "name": "Roteamento",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        1240,
+        400
+      ],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "outputKey": "EM_HUMANO",
+              "conditions": {
+                "combinator": "or",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.estado.status }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "EM_HUMANO"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                }
+              }
+            },
+            {
+              "outputKey": "EM_IA",
+              "conditions": {
+                "combinator": "or",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.estado.status }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "EM_IA"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                }
+              }
+            },
+            {
+              "outputKey": "FINALIZADO",
+              "conditions": {
+                "combinator": "or",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.estado.status }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "FINALIZADO"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                }
+              }
+            },
+            {
+              "outputKey": "NOVO",
+              "conditions": {
+                "combinator": "or",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.estado.status }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "NOVO"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "parar",
+      "name": "Parar (Humano)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        200
+      ]
+    },
+    {
+      "id": "ck",
+      "name": "Check-in (reset EM_IA)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1500,
+        480
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://crm-zeldapdv:3000/api/v1/crm/conversations/check-in",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-zeldapdv-secret",
+              "value": "={{ $env.ZELDAPDV_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "={{ $json.phone }}"
+            },
+            {
+              "name": "customer_name",
+              "value": "={{ $json.name }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ckb",
+      "name": "Merge Checkin",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1740,
+        480
+      ],
+      "parameters": {
+        "jsCode": "const http = ($json.body && typeof $json.body === 'object') ? $json.body : $json;\nconst up = $('Merge Estado').first().json;\nconst isNew = !!(http.is_new_session || http.status === 'NOVO' || (up.estado && up.estado.status === 'NOVO'));\nreturn [{ json: Object.assign({}, up, { checkin: http, isNew: isNew }) }];"
+      }
+    },
+    {
+      "id": "agent",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        480
+      ],
+      "parameters": {
+        "agent": {
+          "mode": "openAiTools",
+          "configuration": {
+            "hasOutputParser": false
+          }
+        },
+        "prompt": "Você é o assistente virtual do restaurante integrado ao sistema ZeldaPDV Food. Seu objetivo é atender os clientes com cortesia, rapidez e clareza. Você pode enviar o link do cardápio digital, verificar o status de pedidos em andamento e registrar feedbacks (elogios, sugestões ou reclamações). Se o cliente manifestar insatisfação grave, problemas com o pedido ou pedir expressamente para \"falar com atendente/humano\", acione imediatamente a ferramenta transfer_to_human. Mantenha respostas curtas e formatadas para leitura fácil no WhatsApp. Não invente preços ou itens; use get_menu_link para obter o cardápio real. Se o cliente quiser fazer um pedido, use start_order (quando disponível) para iniciar o atendimento de pedido no CRM.",
+        "text": "=Cliente: {{ $json.name }} ({{ $json.phone }})\nMensagem: {{ $json.text }}{{ $json.isNew ? \"\n[NOVA CONVERSA] Apresente-se brevemente e envie o link do cardápio digital.\" : \"\" }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "llm",
+      "name": "LLM Cloud (OpenAI)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        2260,
+        300
+      ],
+      "parameters": {
+        "model": "={{ $env.OPENAI_MODEL || \"gpt-4o-mini\" }}",
+        "apiKey": "={{ $env.OPENAI_API_KEY }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "mem",
+      "name": "Memória",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        700
+      ],
+      "parameters": {
+        "sessionKey": "={{ $json.phone }}",
+        "contextWindowLength": 5
+      }
+    },
+    {
+      "id": "tm",
+      "name": "Tool: get_menu_link",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1,
+      "position": [
+        3040,
+        240
+      ],
+      "parameters": {
+        "name": "get_menu_link",
+        "description": "Retorna a URL do cardápio digital quando o cliente pede para ver produtos, preços ou fazer pedidos.",
+        "method": "GET",
+        "url": "http://crm-zeldapdv:3000/api/v1/menu-link",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-zeldapdv-secret",
+              "value": "={{ $env.ZELDAPDV_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "to",
+      "name": "Tool: check_order_status",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1,
+      "position": [
+        3040,
+        380
+      ],
+      "parameters": {
+        "name": "check_order_status",
+        "description": "Consulta o status do pedido mais recente do cliente pelo telefone.",
+        "method": "GET",
+        "url": "=http://crm-zeldapdv:3000/api/v1/orders/status?phone=={{ $('Extrair Dados').first().json.phone }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-zeldapdv-secret",
+              "value": "={{ $env.ZELDAPDV_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ts",
+      "name": "Tool: register_sac_feedback",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1,
+      "position": [
+        3040,
+        520
+      ],
+      "parameters": {
+        "name": "register_sac_feedback",
+        "description": "Registra elogio, reclamação ou sugestão no módulo administrativo do ZeldaPDV.",
+        "method": "POST",
+        "url": "http://crm-zeldapdv:3000/api/v1/sac/tickets",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-zeldapdv-secret",
+              "value": "={{ $env.ZELDAPDV_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "bodyType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "={{ $('Extrair Dados').first().json.phone }}"
+            },
+            {
+              "name": "kind",
+              "value": "={{ $fromAI('kind', 'elogio', 'string') }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $fromAI('message', '', 'string') }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "th",
+      "name": "Tool: transfer_to_human",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1,
+      "position": [
+        3040,
+        660
+      ],
+      "parameters": {
+        "name": "transfer_to_human",
+        "description": "Pausa a IA e direciona a conversa para um atendente humano (transbordo). Dispara no CRM a mudança de status para atendimento humano.",
+        "method": "POST",
+        "url": "http://crm-zeldapdv:3000/api/v1/handoff",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-zeldapdv-secret",
+              "value": "={{ $env.ZELDAPDV_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "bodyType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "={{ $('Extrair Dados').first().json.phone }}"
+            },
+            {
+              "name": "customer_name",
+              "value": "={{ $('Extrair Dados').first().json.name }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $fromAI('message', '', 'string') }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "to2",
+      "name": "Tool: start_order",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1,
+      "position": [
+        3040,
+        800
+      ],
+      "parameters": {
+        "name": "start_order",
+        "description": "Inicia um pedido pelo WhatsApp encaminhando a mensagem para o CRM processar o carrinho. Use quando o cliente quiser comprar ou montar um pedido.",
+        "method": "POST",
+        "url": "http://crm-zeldapdv:3000/api/whatsapp/inbound",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-zeldapdv-secret",
+              "value": "={{ $env.ZELDAPDV_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBody": true,
+        "bodyType": "json",
+        "body": "={{ JSON.stringify({ channel: \"waha\", payload: { from: $('Extrair Dados').first().json.phone, body: $('Extrair Dados').first().json.text, pushName: $('Extrair Dados').first().json.name } }) }}"
+      }
+    },
+    {
+      "id": "wa",
+      "name": "Enviar WAHA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4080,
+        480
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.WAHA_API_URL }}/api/sendText",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Api-Key",
+              "value": "={{ $env.WAHA_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyType": "json",
+        "body": "={{ JSON.stringify({ session: $env.WAHA_SESSION, chatId: $json.chatId || ($json.phone + \"@c.us\"), text: $json.output }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Atendimento": {
+      "main": [
+        [
+          {
+            "node": "Extrair Dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair Dados": {
+      "main": [
+        [
+          {
+            "node": "Consultar Estado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar Estado": {
+      "main": [
+        [
+          {
+            "node": "Merge Estado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Estado": {
+      "main": [
+        [
+          {
+            "node": "Roteamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Roteamento": {
+      "main": [
+        [
+          {
+            "node": "Parar (Humano)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check-in (reset EM_IA)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check-in (reset EM_IA)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check-in (reset EM_IA)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check-in (reset EM_IA)": {
+      "main": [
+        [
+          {
+            "node": "Merge Checkin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Checkin": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Enviar WAHA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "ai_languageModel": [
+        [
+          {
+            "node": "LLM Cloud (OpenAI)",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ],
+      "ai_memory": [
+        [
+          {
+            "node": "Memória",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ],
+      "ai_tool": [
+        [
+          {
+            "node": "Tool: get_menu_link",
+            "type": "ai_tool",
+            "index": 0
+          },
+          {
+            "node": "Tool: check_order_status",
+            "type": "ai_tool",
+            "index": 0
+          },
+          {
+            "node": "Tool: register_sac_feedback",
+            "type": "ai_tool",
+            "index": 0
+          },
+          {
+            "node": "Tool: transfer_to_human",
+            "type": "ai_tool",
+            "index": 0
+          },
+          {
+            "node": "Tool: start_order",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

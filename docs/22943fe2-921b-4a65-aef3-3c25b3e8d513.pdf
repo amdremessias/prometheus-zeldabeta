@@ -1,0 +1,52 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [6 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 1082 >>
+stream
+BT /F2 10.5 Tf 1 0 0 1 40.94 836.39 Tm (ZeldaPDV - Conveniência) Tj ET
+BT /F1 7.5 Tf 1 0 0 1 54.89 822.75 Tm (Comprovante de Venda - PDV) Tj ET
+4 804.995 m 222.772 804.995 l S
+BT /F1 9 Tf 1 0 0 1 4.00 803.00 Tm (Data                   15/09/2026, 20:34) Tj ET
+BT /F1 9 Tf 1 0 0 1 4.00 791.29 Tm (Forma\(s\)                        Dinheiro) Tj ET
+4 771.595 m 222.772 771.595 l S
+BT /F1 9 Tf 1 0 0 1 4.00 769.60 Tm (1x PROD-TESTE-BARCODE           R$ 20,00) Tj ET
+4 749.895 m 222.772 749.895 l S
+BT /F1 9 Tf 1 0 0 1 4.00 747.89 Tm (Subtotal                        R$ 20,00) Tj ET
+BT /F1 9 Tf 1 0 0 1 4.00 736.19 Tm (Taxa de serviço: 5%              R$ 1,00) Tj ET
+4 716.495 m 222.772 716.495 l S
+BT /F2 9 Tf 1 0 0 1 4.00 714.50 Tm (Total                           R$ 21,00) Tj ET
+4 694.795 m 222.772 694.795 l S
+BT /F1 9 Tf 1 0 0 1 4.00 692.79 Tm (Pago                            R$ 22,00) Tj ET
+BT /F1 9 Tf 1 0 0 1 4.00 681.10 Tm (Troco                            R$ 1,00) Tj ET
+4 661.395 m 222.772 661.395 l S
+BT /F1 7.5 Tf 1 0 0 1 54.89 659.39 Tm (Obrigado pela preferência!) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 226.772 850.395] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 5 0 R >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000210 00000 n 
+0000000310 00000 n 
+0000001444 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+1588
+%%EOF

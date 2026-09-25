@@ -1,0 +1,72 @@
+{
+  "meta": {
+    "title": "Auditoria de Segurança — ZeldaPDV",
+    "version": "1.11.11-base-build-29082026",
+    "date": "29/08/2026",
+    "scope": "5 categorias: isolamento de tenant, permissões server-side, IDOR, segredos hardcoded, XSS",
+    "surface": "55 rotas de API (src/app/api/**); frontend React 19; libs auth-core/permissions"
+  },
+  "remediacao": {
+    "data": "29/08/2026",
+    "resolvidos": 8,
+    "abertos": 1,
+    "nota": "Pós-correção: 8/9 mitigados em código/compose. F-03 permanece parcial (key ainda em docker-compose-fixed.yml, docker-build-crm.yml, n8n/*.json e não revogada)."
+  },
+  "summary": { "critica": 3, "alta": 2, "media": 3, "baixa": 0, "pontoForte": 2 },
+  "categories": [
+    {
+      "id": "tenant",
+      "name": "Isolamento de tenant / multi-tenant",
+      "verdict": "Ponto forte",
+      "severity": "pontoForte",
+      "detail": "Instância única por cliente. Cada cliente recebe um stack Docker próprio (docker-compose-zeldapdv.yml) com volume Postgres independente e DATABASE_URL própria. Não há RLS/ORM; o isolamento é garantido por separação física de banco. Dentro da instância, a equipe compartilha dados do negócio por design. Sem contaminação cross-tenant observada."
+    },
+    {
+      "id": "perms",
+      "name": "Permissões de browser-only / server-side",
+      "verdict": "Misto",
+      "severity": "media",
+      "detail": "Controles corretos no servidor: backup/route.ts usa requireAdmin; users/route.ts e users/[id]/route.ts usam canManageUsers; pedidos-web/[id] e whatsapp/human/* checam sessão. Porém integrations/whatsapp/settings (GET/PUT) NÃO checa getSessionUser e /api/state PUT aceita qualquer usuário autenticado. O front usa can() para esconder botões, mas é contornável."
+    },
+    {
+      "id": "idor",
+      "name": "IDOR (access control por objeto)",
+      "verdict": "Adequado / Pontual",
+      "severity": "pontoForte",
+      "detail": "Todos os GETs de negócio exigem sessão; rotas de usuário e backup exigem admin/canManageUsers. Não foram encontrados endpoints que exponham dados de outros objetos via ID previsível. Risco concentra-se em /api/state (PUT sem role) e whatsapp/settings (sem auth)."
+    },
+    {
+      "id": "secrets",
+      "name": "Segredos hardcoded",
+      "verdict": "Crítico",
+      "severity": "critica",
+      "detail": "JWT_SECRET com fallback 'dev-secret-zeldapdv-food' (auth-core.ts:6) injetado pelo compose (docker-compose-zeldapdv.yml:50) via ${JWT_SECRET:-dev-secret-zeldapdv} → guarda de produção nunca dispara. WAHA_API_KEY real vazado em .env e n8n/zelda-fixed-import.json. ADMIN_EMAIL/PASSWORD e BOT_API_TOKEN com defaults fracos. ZELDAPDV_WEBHOOK_SECRET default 'e6bfc7bb...'. Sem .gitignore de .env e repositório não é git."
+    },
+    {
+      "id": "xss",
+      "name": "XSS (stored/reflected)",
+      "verdict": "Alto",
+      "severity": "alta",
+      "detail": "OperationalReportPrints.tsx (linhas 5,7,8,9) monta document.write(html) com observacoes/nome/telefone do cliente vindo de /api/pedidos-web e /api/relatorios/carteira SEM escapar. Cliente malicioso injeta script no campo observacoes do pedido → XSS armazenado na impressão do relatório operacional. Sem biblioteca de sanitização no package.json."
+    }
+  ],
+  "findings": [
+    { "id": "F-01", "severity": "critica", "file": "src/lib/auth-core.ts", "line": "6", "title": "JWT secret com fallback inseguro ('dev-secret-zeldapdv-food')", "recommendation": "Remover fallback; falhar o boot se JWT_SECRET não estiver definido em produção. Rotacionar segredos e invalidar tokens emitidos.", "status": "resolvido", "nota": "Produção exige JWT_SECRET; dev mantém fallback. Compose sem default e .env com valor forte." },
+    { "id": "F-02", "severity": "critica", "file": "docker-compose-zeldapdv.yml", "line": "50", "title": "Compose injeta JWT_SECRET=${JWT_SECRET:-dev-secret-zeldapdv} (guarda nunca ativa)", "recommendation": "Exigir JWT_SECRET via secret real; nunca default. Usar docker secrets / Vault.", "status": "resolvido", "nota": "Default removido; valor vem de .env." },
+    { "id": "F-03", "severity": "critica", "file": ".env / n8n/zelda-fixed-import.json", "line": "9", "title": "WAHA_API_KEY real hardcoded e commitado (67fe4b0e...)", "recommendation": "Revogar a chave; mover para secret não versionado; varrer .next/standalone e histórico de backups. Adicionar .env ao .gitignore.", "status": "aberto", "nota": "RESIDUAL: docker-compose-zeldapdv.yml corrigido, mas docker-compose-fixed.yml:74, docker-build-crm.yml:26 e n8n/*.json ainda embutem a chave literal. Chave NÃO revogada." },
+    { "id": "F-04", "severity": "alta", "file": "src/app/api/state/route.ts", "line": "73-77", "title": "PUT /api/state sem checagem de role (qualquer usuário autenticado grava app_state)", "recommendation": "Exigir can(user.role,'config') no servidor. Nunca confiar só no gate do front.", "status": "resolvido", "nota": "PUT exige can(role,'config'); caixa/garçom recebem 403." },
+    { "id": "F-05", "severity": "alta", "file": "src/modules/relatorios/OperationalReportPrints.tsx", "line": "5,7,8,9", "title": "XSS armazenado via document.write com dados do cliente sem escapar", "recommendation": "Usar DOM/React para renderizar o relatório e escapar via textContent; ou sanitizar com DOMPurify. Nunca concatenar HTML com input do usuário.", "status": "resolvido", "nota": "Helper esc() aplica escape em todos os campos dinâmicos." },
+    { "id": "F-06", "severity": "alta", "file": "src/lib/server/webhookAuth.ts", "line": "4-12", "title": "checkWebhookSecret fail-open quando ZELDAPDV_WEBHOOK_SECRET ausente", "recommendation": "Falhar fechado: retornar false se o segredo esperado não estiver configurado.", "status": "resolvido", "nota": "Retorna false sem segredo esperado (fail-closed)." },
+    { "id": "F-07", "severity": "media", "file": "src/app/api/integrations/whatsapp/settings/route.ts", "line": "9,18", "title": "GET/PUT sem getSessionUser (qualquer um autenticado altera integração)", "recommendation": "Exigir getSessionUser + role admin no servidor para ambos os métodos.", "status": "resolvido", "nota": "GET exige sessão; PUT exige can(role,'integracoes')." },
+    { "id": "F-08", "severity": "media", "file": "docker-compose-zeldapdv.yml", "line": "51-52", "title": "ADMIN_EMAIL/ADMIN_PASSWORD com defaults fracos (admin123)", "recommendation": "Exigir senha forte no provisionamento; não default. Forçar troca no primeiro login.", "status": "resolvido", "nota": "Defaults removidos; .env com ADMIN_EMAIL/PASSWORD fortes; seed exige em produção." },
+    { "id": "F-09", "severity": "media", "file": "docker-compose-zeldapdv.yml", "line": "60", "title": "BOT_API_TOKEN default fraco ('zpdv-local-dev-token-...')", "recommendation": "Gerar token aleatório por instância; nunca default conhecido.", "status": "resolvido", "nota": "Default removido; valor vem de .env." }
+  ],
+  "coverage": [
+    "backup/route.ts + requireAdmin — somente admin.",
+    "users/route.ts e users/[id]/route.ts — canManageUsers.",
+    "pedidos-web/[id], whatsapp/human/* — checam sessão.",
+    "Todos os GETs de negócio exigem auth; safeBackupName bloqueia traversal.",
+    "WhatsApp inbound / official webhook — x-zeldapdv-secret / META_VERIFY_TOKEN.",
+    "Chat renderizado via JSX React (seguro)."
+  ]
+}

@@ -1,0 +1,197 @@
+# ============================================================================
+#  Stack Zelda PDV zeldapdv — dependências juntas na mesma rede interna.
+#  O nginx fica FORA desta stack (reverse proxy no host/outro container),
+#  para permitir escalar novas instâncias por cliente com add-client.sh.
+#
+#  Integração interna por nome de serviço (sem portas do host):
+#    crm  -> postgres   via db-zeldapdv:5432
+#    crm  -> waha       via http://waha-zeldapdv:3000
+#    n8n  -> crm        via http://crm-zeldapdv:3000
+#    n8n  -> waha       via http://waha-zeldapdv:3000
+#    waha -> n8n        via http://n8n-zeldapdv:5678 (webhook)
+# ============================================================================
+
+name: restaurante-tech-main-zeldapdv
+
+services:
+  db-zeldapdv:
+    image: postgres:16-alpine
+    container_name: restaurante-zeldapdv-postgres
+    environment:
+      POSTGRES_USER: zelda
+      POSTGRES_PASSWORD: zelda
+      POSTGRES_DB: zeldapdv
+    ports:
+      - "5444:5432"
+    volumes:
+      - restaurante_zeldapdv_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zelda -d zeldapdv"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks: [restaurante-zeldapdv]
+
+  crm-zeldapdv:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_BRAND_NAME: "${NEXT_PUBLIC_BRAND_NAME}"
+        NEXT_PUBLIC_BRAND_LOGO: "${NEXT_PUBLIC_BRAND_LOGO}"
+        NEXT_PUBLIC_BRAND_FOOTER: "${NEXT_PUBLIC_BRAND_FOOTER}"
+    container_name: restaurante-zeldapdv-crm
+    user: root
+    ports:
+      - "3013:3000"
+    environment:
+      DATABASE_URL: postgresql://zelda:zelda@db-zeldapdv:5432/zeldapdv
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      SESSION_SECURE: ${SESSION_SECURE:-false}
+      NEXT_PUBLIC_BRAND_NAME: ${NEXT_PUBLIC_BRAND_NAME:-Zelda PDV Unica}
+      NEXT_PUBLIC_BRAND_LOGO: ${NEXT_PUBLIC_BRAND_LOGO:-/logo.svg}
+      NEXT_PUBLIC_BRAND_FOOTER: ${NEXT_PUBLIC_BRAND_FOOTER:-Selo de Segurança do Sistema}
+      CRM_PUBLIC_URL: ${CRM_PUBLIC_URL:-}
+      CRM_WEBHOOK_SECRET: ${ZELDAPDV_WEBHOOK_SECRET}
+      WPP_INBOUND_TOKEN: ${ZELDAPDV_WEBHOOK_SECRET}
+      BOT_API_TOKEN: ${BOT_API_TOKEN}
+      # Integração interna: CRM -> WAHA
+      WAHA_API_URL: http://waha-zeldapdv:3000
+      WAHA_API_KEY: ${WAHA_API_KEY}
+      WAHA_SESSION: ${WAHA_SESSION:-session_zeldapdv}
+      # Agente IA de autoatendimento (Gemini) — fallback local se o n8n estiver indisponível
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
+      GEMINI_TIMEOUT_MS: ${GEMINI_TIMEOUT_MS:-45000}
+      GEMINI_MAX_ATTEMPTS: ${GEMINI_MAX_ATTEMPTS:-2}
+      # Agente IA hospedado no n8n (padrão teknos: a IA vive no n8n, o CRM a aciona)
+      ZELDAPDV_WEBHOOK_SECRET: ${ZELDAPDV_WEBHOOK_SECRET}
+      ZELDAPDV_AI_WEBHOOK_URL: http://n8n-zeldapdv:5678/webhook/zeldapdv-gemini
+      ZELDAPDV_AI_TIMEOUT_MS: 20000
+      # Licenciamento (JWT Ed25519 / EdDSA) — DESLIGADO por padrão (sem chave pública).
+      LICENSE_CLIENT_ID: ${LICENSE_CLIENT_ID:-zelda-core}
+      LICENSE_DOMAIN: ${LICENSE_DOMAIN:-localhost}
+      LICENSE_MASTER_PUBLIC_KEY: ${LICENSE_MASTER_PUBLIC_KEY:-}
+      LICENSE_MASTER_PRIVATE_KEY: ${LICENSE_MASTER_PRIVATE_KEY:-}
+      LICENSE_JWT: ${LICENSE_JWT:-}
+      MASTER_API_TOKEN: ${MASTER_API_TOKEN:-}
+    volumes:
+      - restaurante_zeldapdv_backups:/backups
+      - restaurante_zeldapdv_branding:/app/public/branding
+    depends_on:
+      db-zeldapdv:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [restaurante-zeldapdv]
+
+  waha-zeldapdv:
+    # Em produção, EVITE "latest": fixe uma tag/digest conhecido (um "latest"
+    # quebrado pode trazer um sharp/wppconnect incompatível com o glibc/arch da VPS).
+    image: devlikeapro/waha:latest
+    container_name: restaurante-zeldapdv-waha
+    env_file: [.env]
+    environment:
+      WHATSAPP_DEFAULT_ENGINE: WEBJS
+      # Contorna crash de require do "sharp" (wppconnect) por detecção de libvips
+      # no glibc da VPS: força o uso do binário embutido em vez do libvips do sistema.
+      SHARP_IGNORE_GLOBAL_LIBVIPS: "1"
+      # Integração interna: WAHA -> CRM (dispatcher; o CRM aciona o n8n para a IA)
+      WHATSAPP_HOOK_URL: ${WHATSAPP_HOOK_URL:-http://n8n-zeldapdv:5678/webhook/zeldapdv-waha-cloud}
+      WHATSAPP_HOOK_EVENTS: message
+      WAHA_BASE_URL: http://waha-zeldapdv:3000
+    ports:
+      - "3012:3000"
+    volumes:
+      - restaurante_zeldapdv_waha_sessions:/app/.sessions
+    restart: unless-stopped
+    networks: [restaurante-zeldapdv]
+
+  n8n-zeldapdv:
+    image: n8nio/n8n:2.33.7
+    container_name: restaurante-zeldapdv-n8n
+    environment:
+      N8N_HOST: 0.0.0.0
+      N8N_PORT: 5678
+      N8N_EDITOR_BASE_URL: https://n8n.zeldapdv.internal.lab
+      WEBHOOK_URL: https://n8n.zeldapdv.internal.lab/
+      N8N_WEBHOOK_URL: https://n8n.zeldapdv.internal.lab/
+      N8N_SECURE_COOKIE: "false"
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+      N8N_COMMUNITY_PACKAGES_ENABLED: "true"
+      TZ: America/Sao_Paulo
+      # Integração interna: N8N -> WAHA
+      WAHA_API_URL: http://waha-zeldapdv:3000
+      WAHA_API_KEY: ${WAHA_API_KEY}
+      WAHA_SESSION: default
+      # Integração interna: N8N -> CRM
+      CRM_API_URL: http://crm-zeldapdv:3000
+      CRM_BASE_URL: http://crm-zeldapdv:3000
+      CRM_WEBHOOK_SECRET: ${ZELDAPDV_WEBHOOK_SECRET}
+      WPP_INBOUND_TOKEN: ${ZELDAPDV_WEBHOOK_SECRET}
+      RESTAURANTE_PEDIDO_WEBHOOK_URL: http://crm-zeldapdv:3000/api/integrations/whatsapp/order
+      BOT_API_TOKEN: ${BOT_API_TOKEN}
+      # Agente IA Gemini executado dentro do n8n (Workflow "ZeldaPDV - Agente Gemini")
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
+      ZELDAPDV_WEBHOOK_SECRET: ${ZELDAPDV_WEBHOOK_SECRET}
+      # Provedores de LLM para os workflows de atendimento n8n (cloud vs local)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://10.0.0.0:11434}
+      # Meta Cloud API (WhatsApp Business oficial)
+      META_PHONE_ID: ${META_PHONE_ID:-}
+      META_ACCESS_TOKEN: ${META_ACCESS_TOKEN:-}
+      META_VERIFY_TOKEN: ${META_VERIFY_TOKEN:-zeldapdv-meta-verify}
+      # Para onde o CRM encaminha as mensagens da Meta Cloud API (n8n)
+      ZELDAPDV_META_AI_WEBHOOK_URL: ${ZELDAPDV_META_AI_WEBHOOK_URL:-http://n8n-zeldapdv:5678/webhook/zeldapdv-meta-cloud}
+    ports:
+      - "5688:5678"
+    volumes:
+      - restaurante_zeldapdv_n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+    depends_on: [waha-zeldapdv, crm-zeldapdv]
+    restart: unless-stopped
+    networks: [restaurante-zeldapdv]
+
+  # ── Módulo Fiscal (NFC-e / NF-e) ─────────────────────────────────────────────
+  # Fase 1 (UI + Data Layer): container é um ESQUELETO (sem transmissão real p/ SEFAZ),
+  # expõe /health e /emitir (stub). Gated por profile "fiscal" para NÃO derrubar a stack
+  # se a imagem não estiver disponível ou se o serviço não for necessário.
+  fiscal-zeldapdv:
+    build:
+      context: ./fiscal
+    image: fiscallow/zeldapdv-fiscal:latest
+    container_name: restaurante-zeldapdv-fiscal
+    profiles: ["fiscal"]
+    environment:
+      DB_HOST: db-zeldapdv
+      DB_PORT: 5432
+      DB_NAME: zeldapdv
+      DB_USER: zelda
+      DB_PASS: zelda
+      FISCAL_AMBIENTE: "2" # homologação only nesta fase
+    ports:
+      - "8085:80"
+    volumes:
+      - restaurante_zeldapdv_fiscal_storage:/var/www/html/storage
+    depends_on:
+      db-zeldapdv:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [restaurante-zeldapdv]
+
+networks:
+  restaurante-zeldapdv:
+    name: restaurante-zeldapdv
+
+volumes:
+  restaurante_zeldapdv_pgdata:
+  restaurante_zeldapdv_waha_sessions:
+  restaurante_zeldapdv_n8n_data:
+  restaurante_zeldapdv_backups:
+  restaurante_zeldapdv_branding:
+  restaurante_zeldapdv_fiscal_storage:

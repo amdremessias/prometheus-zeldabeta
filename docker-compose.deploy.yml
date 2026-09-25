@@ -1,0 +1,108 @@
+services:
+  db-zeldapdv:
+    image: postgres:16-alpine
+    container_name: restaurante-zeldapdv-postgres
+    environment:
+      POSTGRES_USER: zelda
+      POSTGRES_PASSWORD: zelda
+      POSTGRES_DB: zeldapdv
+    ports:
+      - "5444:5432"
+    volumes:
+      - restaurante_zeldapdv_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zelda -d zeldapdv"]
+    restart: unless-stopped
+    networks: [restaurante-zeldapdv]
+  crm-zeldapdv:
+    build: .
+    container_name: restaurante-zeldapdv-crm
+    ports:
+      - "3013:3000"
+    environment:
+      DATABASE_URL: postgresql://zelda:zelda@db-zeldapdv:5432/zeldapdv
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-zeldapdv}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-adm@zeldapdv.lab}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      NEXT_PUBLIC_BRAND_NAME: Zelda PDV
+      ZELDAPDV_WEBHOOK_SECRET: ${ZELDAPDV_WEBHOOK_SECRET}
+      WPP_INBOUND_TOKEN: ${ZELDAPDV_WEBHOOK_SECRET}
+      WAHA_API_URL: http://waha-zeldapdv:3000
+      WAHA_API_KEY: ${WAHA_API_KEY}
+      WAHA_SESSION: session_zeldapdv
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
+      ZELDAPDV_AI_WEBHOOK_URL: http://n8n-zeldapdv:5678/webhook/zeldapdv-gemini
+      ZELDAPDV_AI_TIMEOUT_MS: 20000
+    depends_on:
+      db-zeldapdv:
+        condition: service_healthy
+    volumes:
+      - restaurante_zeldapdv_backups:/backups
+    restart: unless-stopped
+    networks: [restaurante-zeldapdv]
+  waha-zeldapdv:
+    image: devlikeapro/waha:latest
+    container_name: restaurante-zeldapdv-waha
+    env_file: [.env]
+    environment:
+      WHATSAPP_DEFAULT_ENGINE: WEBJS
+      WHATSAPP_HOOK_URL: http://crm-zeldapdv:3000/api/whatsapp/inbound
+      WHATSAPP_HOOK_EVENTS: message
+    ports:
+      - "3012:3000"
+    volumes:
+      - restaurante_zeldapdv_waha_sessions:/app/.sessions
+    restart: unless-stopped
+    networks: [restaurante-zeldapdv]
+  n8n-zeldapdv:
+    image: n8nio/n8n:2.33.7
+    container_name: restaurante-zeldapdv-n8n
+    environment:
+      N8N_HOST: 0.0.0.0
+      N8N_PORT: 5678
+      N8N_EDITOR_BASE_URL: https://n8n.zeldapdv.internal.lab
+      WEBHOOK_URL: https://n8n.zeldapdv.internal.lab/
+      N8N_SECURE_COOKIE: "false"
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+      N8N_COMMUNITY_PACKAGES_ENABLED: "true"
+      TZ: America/Sao_Paulo
+      WAHA_API_URL: http://waha-zeldapdv:3000
+      WAHA_API_KEY: ${WAHA_API_KEY}
+      WAHA_SESSION: default
+      CRM_API_URL: http://crm-zeldapdv:3000
+      WPP_INBOUND_TOKEN: ${ZELDAPDV_WEBHOOK_SECRET}
+      CRM_BASE_URL: http://crm-zeldapdv:3000
+      CRM_WEBHOOK_SECRET: ${ZELDAPDV_WEBHOOK_SECRET}
+      ZELDAPDV_WEBHOOK_SECRET: ${ZELDAPDV_WEBHOOK_SECRET}
+      RESTAURANTE_PEDIDO_WEBHOOK_URL: http://crm-zeldapdv:3000/api/integrations/whatsapp/order
+      BOT_API_TOKEN: ${BOT_API_TOKEN}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
+    ports:
+      - "5688:5678"
+    volumes:
+      - restaurante_zeldapdv_n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+    depends_on: [waha-zeldapdv, crm-zeldapdv]
+    restart: unless-stopped
+    networks: [restaurante-zeldapdv]
+networks:
+  restaurante-zeldapdv:
+    name: restaurante-zeldapdv
+volumes:
+  restaurante_zeldapdv_pgdata:
+  restaurante_zeldapdv_waha_sessions:
+  restaurante_zeldapdv_n8n_data:
+  restaurante_zeldapdv_backups:
+
+
+
+
+
+
+
+
+
+
