@@ -1,32 +1,8 @@
-# 🍽️ Zelda PDV — PDV Client-Side
+# 🛒 Zelda PDV — Ponto de Venda & Gestão para Alimentação
 
-**Zelda PDV** é um sistema de Ponto de Venda (PDV) para restaurantes e estabelecimentos comerciais 100% *client-side*, utilizando **IndexedDB** como armazenamento local. É a solução ideal para estabelecimentos que buscam simplicidade, alta performance offline e total controle diretamente no navegador.
+O **Zelda PDV** é um sistema completo de ponto de venda e gestão comercial desenvolvido para estabelecimentos do segmento de alimentação (bares, restaurantes, lanchonetes e delivery). 
 
----
-
-## 🎯 Módulos do Sistema
-
-* **🛒 PDV:** Tela de venda rápida no balcão com busca, categorias, formas de pagamento (dinheiro, cartão, PIX) e venda fiado para clientes com carteira.
-* **👥 Clientes:** Cadastro de clientes com perfil de carteira (fiado) habilitável, controlo de saldo e extrato de movimentações.
-* **📊 Relatórios:** Consulta de movimentações por período/tipo e consulta de carteiras de clientes com débito.
-* **🍕 Cardápio:** Gestão completa e edição de produtos, categorias e preços.
-* **🪑 Mesas:** Abertura, acompanhamento e fechamento de pedidos por mesa.
-* **🛵 Entregas:** Gestão de pedidos para entrega ou retirada local.
-* **👨‍🍳 Cozinha:** Painel KDS de produção com acompanhamento do status dos pedidos.
-* **💼 Contabilidade:** Resumo de vendas, fechamento de caixa e relatórios financeiros.
-* **⚙️ Configurações:** Personalização completa (dados do restaurante, moeda, modo de operação, etc.).
-
----
-
-## ✨ Funcionalidades Principais
-
-- 💾 **Armazenamento 100% Local:** Persistência total com IndexedDB.
-- ⚡ **Funciona Offline:** Operação contínua mesmo sem ligação à rede.
-- 📱 **Interface Responsiva:** Otimizada para smartphones, tablets e desktops.
-- 📲 **PWA Instalável:** Suporte a ícone na home, navegação em tela cheia e funcionamento offline.
-- 🔄 **Suporte Multidispositivo:** Adapta-se a diferentes tamanhos de ecrã.
-- 🧪 **Modo Demo:** Ambiente de testes sem impacto na base de dados real.
-- 🏷️ **White Label:** Nome, logo, descrição e esquema de cores configuráveis via variáveis de ambiente.
+Construído com arquitetura *client-side*, o sistema prioriza alta disponibilidade e performance operando de forma **offline-first** via IndexedDB e suporte a PWA, além de oferecer suporte a múltiplos estabelecimentos (*White Label*) e deploy containerizado.
 
 ---
 
@@ -34,17 +10,89 @@
 
 | Camada | Tecnologia |
 | :--- | :--- |
-| **Framework** | Next.js 16 (App Router, Turbopack) |
-| **UI & Styling** | React 19, Tailwind CSS v4, Radix UI |
-| **Gestão de Estado** | Zustand |
-| **Persistência** | IndexedDB (`idb`) |
-| **Deploy & Execução** | Docker (Next.js Standalone) |
-| **Qualidade & Código** | TypeScript, ESLint |
+| **Framework Frontend** | Next.js 16 (App Router) + React 19 |
+| **Estilização & UI** | Tailwind CSS + Lucide React (Ícones) |
+| **Persistência Local** | IndexedDB (Dexie.js / LocalStorage) |
+| **Gerenciamento de Estado** | React Context API / Custom Hooks |
+| **Infraestrutura / Container** | Docker + Docker Compose + Nginx |
+| **PWA & Offline** | Web App Manifest + Service Workers |
 
 ---
 
-## 🚀 Como Rodar Localmente
+## 📁 Estrutura do Projeto
 
-1. **Instale as dependências:**
-   ```bash
-   npm install
+<pre><code>zelda-pdv/
+├── src/
+│   ├── app/                # Rotas e páginas do Next.js (App Router)
+│   │   ├── (auth)/         # Autenticação e seleção de módulo
+│   │   ├── pdv/            # Frente de caixa e caixa rápido
+│   │   ├── mesas/          # Gestão de mesas e comandas
+│   │   ├── estoque/        # Ficha técnica e controle de insumos
+│   │   ├── vendas/         # Histórico, sangria e fechamento de caixa
+│   │   └── configuracoes/  # White Label, impressoras e parâmetros
+│   ├── components/         # Componentes reutilizáveis de UI
+│   ├── context/            # Contextos globais (Carrinho, Caixa, Empresa)
+│   ├── lib/                # Configurações do IndexedDB e utilitários
+│   └── types/              # Definições de tipos TypeScript
+├── public/                 # Assets estáticos, manifest PWA e ícones
+├── docker-compose.yml      # Orquestração do container do projeto
+├── Dockerfile              # Build otimizado em multi-stage para produção
+└── nginx.conf              # Proxy e roteamento para produção
+</code></pre>
+
+---
+
+## 🚀 Módulos do Sistema
+
+* **Frente de Caixa (PDV):** Emissão rápida de pedidos, busca por código ou categoria, suporte a múltiplos meios de pagamento e desconto.
+* **Gestão de Mesas e Comandas:** Acompanhamento de consumo em tempo real, transferência de mesas, divisão de conta e impressão de pedidos na cozinha.
+* **Venda em Carteira / Fiado:** Controle de crédito de clientes recorrentes com histórico de pagamentos e limite de crédito.
+* **Modo Demo & Testes:** Ambiente isolado pré-carregado com dados fictícios para treinamento de operadores sem afetar o banco principal.
+* **Suporte White Label:** Customização completa de marca, logo, cores do tema e dados fiscais do estabelecimento.
+
+---
+
+## 💻 Execução Local
+
+### Pré-requisitos
+* Node.js 18+ instalado
+* NPM ou PNPM
+
+### Passo a Passo
+
+1. **Clonar o repositório:**
+git clone https://github.com/seu-usuario/zelda-pdv.git
+cd zelda-pdv
+
+
+2. **Instalar as dependências:**
+npm install
+
+
+3. **Executar em modo de desenvolvimento:**
+npm run dev
+
+
+4. **Acessar a aplicação:**
+Abre o teu navegador e acede a `http://localhost:3000`.
+
+---
+
+## 🐳 Execução via Docker
+
+Para rodar a aplicação em ambiente isolado ou servidor local via Docker:
+
+1. **Subir a aplicação com Docker Compose:**
+docker compose up -d --build
+
+
+2. **Acessar:**
+A aplicação estará disponível na porta configurada (padrão: `http://localhost:80`).
+
+---
+
+## 🔒 Persistência de Dados e Backup
+
+Como o Zelda PDV utiliza armazenamento local (IndexedDB) para garantir a operação sem internet:
+* Os dados do caixa e catálogo ficam salvos no próprio navegador.
+* Recomenda-se realizar o **export dos dados/backup** no painel de configurações antes de limpar o cache do navegador.
