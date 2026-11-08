@@ -104,7 +104,7 @@ export interface GeminiDecision {
     fullText?: string;
 }
 
-const SYSTEM_PROMPT = (menuText: string) => `Você é a IA de autoatendimento de um restaurante, atendendo clientes pelo WhatsApp.
+export const buildSystemPrompt = (menuText: string) => `Você é a IA de autoatendimento de um restaurante, atendendo clientes pelo WhatsApp.
 Use APENAS os itens do cardápio abaixo (id, nome, preço). Nunca invente itens nem ids.
 
 ${menuText}
@@ -130,13 +130,36 @@ Regras:
 - Se quiser pedir mas os itens forem ambíguos, intent="clarify" (pergunte o que precisa).
 - reply deve ser curto, no máximo 3 frases, e mencione valores em R$.`;
 
+export function parseGeminiDecision(raw: string): GeminiDecision | null {
+    const parsed = extractJson(raw);
+    if (!parsed) return null;
+    const allowed = new Set<GeminiDecision['intent']>(['reply', 'menu', 'order', 'status', 'feedback', 'human', 'clarify']);
+    const rawIntent = String(parsed.intent || 'reply').toLowerCase() as GeminiDecision['intent'];
+    const intent = allowed.has(rawIntent) ? rawIntent : 'reply';
+    const items = Array.isArray(parsed.items)
+        ? (parsed.items as { id?: number; quantity?: number }[]).map((i) => ({ id: Number(i.id), quantity: Math.min(Math.max(Number(i.quantity) || 1, 1), 50) })).filter((i) => Number.isFinite(i.id) && i.id > 0)
+        : undefined;
+    const tipoEntrega = parsed.tipoEntrega === 'retirada' || parsed.tipoEntrega === 'entrega' ? parsed.tipoEntrega : undefined;
+    const pagamentoMap: Record<string, GeminiDecision['pagamento']> = { pix: 'pix', cartao: 'cartao', dinheiro: 'dinheiro', carteira: 'carteira', fiado: 'carteira' };
+    return {
+        intent,
+        reply: String(parsed.reply || '').trim(),
+        items,
+        tipoEntrega,
+        pagamento: pagamentoMap[String(parsed.pagamento || '').toLowerCase()],
+        clienteNome: String(parsed.clienteNome || '').trim() || undefined,
+        endereco: String(parsed.endereco || '').trim() || undefined,
+        fullText: raw,
+    };
+}
+
 export async function interpretMessage(args: {
     text: string;
     menu: MenuPublico;
     history?: { sender: 'customer' | 'automation'; text: string }[];
 }): Promise<GeminiDecision> {
     const menuText = formatMenuForPrompt(args.menu);
-    const messages: ChatMessage[] = [{ role: 'user', text: SYSTEM_PROMPT(menuText) }];
+    const messages: ChatMessage[] = [{ role: 'user', text: buildSystemPrompt(menuText) }];
     if (args.history && args.history.length) {
         const tail = args.history.slice(-6);
         messages.push({
@@ -150,37 +173,6 @@ export async function interpretMessage(args: {
     if (!raw) {
         return { intent: 'clarify', reply: 'Não consegui processar agora. Um atendente vai te ajudar em instantes. 🙏' };
     }
-    const parsed = extractJson(raw);
-    if (!parsed) {
-        return { intent: 'clarify', reply: 'Não entendi direito. Pode repetir, por favor? 🙂' };
-    }
-
-    const intent = String(parsed.intent || 'reply').toLowerCase() as GeminiDecision['intent'];
-    const reply = String(parsed.reply || '').trim();
-    const items = Array.isArray(parsed.items)
-        ? (parsed.items as { id?: number; quantity?: number }[]).map((i) => ({
-              id: Number(i.id),
-              quantity: Math.min(Math.max(Number(i.quantity) || 1, 1), 50),
-          }))
-        : undefined;
-    const tipoEntrega = parsed.tipoEntrega === 'retirada' || parsed.tipoEntrega === 'entrega' ? parsed.tipoEntrega : undefined;
-    const pagamentoMap: Record<string, GeminiDecision['pagamento']> = {
-        pix: 'pix',
-        cartao: 'cartao',
-        dinheiro: 'dinheiro',
-        carteira: 'carteira',
-        fiado: 'carteira',
-    };
-    const pagamento = pagamentoMap[String(parsed.pagamento || '').toLowerCase()];
-
-    return {
-        intent,
-        reply,
-        items,
-        tipoEntrega,
-        pagamento,
-        clienteNome: String(parsed.clienteNome || '').trim() || undefined,
-        endereco: String(parsed.endereco || '').trim() || undefined,
-        fullText: raw,
-    };
+    const decision = parseGeminiDecision(raw);
+    return decision || { intent: 'clarify', reply: 'Não entendi direito. Pode repetir, por favor? 🙂' };
 }

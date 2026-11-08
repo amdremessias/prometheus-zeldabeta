@@ -62,6 +62,16 @@ Certifique-se de que o DNS wildcard aponta para o IP da VPS:
 | `BACKUPS_DIR` | `<repo>/deploy/multi-client/backups` | dumps por cliente |
 | `HTTP_PORT`/`HTTPS_PORT` | `80`/`443` | portas do nginx |
 
+## WhatsApp e IA por cliente
+
+Cada instância mantém configuração própria em `clients/<cliente>/.env` e no banco isolado. O painel **Configurações → Integrações** escolhe o provedor e ativa o atendimento automático; nenhuma instância compartilha conversa, banco, gateway de IA ou credenciais com outra.
+
+- **WAHA:** configure `WAHA_API_URL`, `WAHA_API_KEY` (quando exigida) e `WAHA_WEBHOOK_HMAC_KEY`. No próprio WAHA do cliente, aponte o webhook para `https://<cliente>.<domínio>/api/integrations/whatsapp/waha/webhook` e use a mesma HMAC key; o endpoint valida `X-Webhook-Hmac` (SHA-512). O cliente precisa ter uma instância WAHA própria ou dedicada, acessível pelo app.
+- **Meta Cloud API:** configure `WHATSAPP_CLOUD_PHONE_ID`, `WHATSAPP_CLOUD_ACCESS_TOKEN`, `WHATSAPP_CLOUD_VERIFY_TOKEN` e `WHATSAPP_CLOUD_APP_SECRET`. Use a URL pública `https://<cliente>.<domínio>/api/integrations/whatsapp/official/webhook` na Meta; o POST valida `X-Hub-Signature-256`.
+- **IA:** selecione Gemini, um n8n isolado ou um gateway OpenAI-compatible por `ZELDAPDV_AI_PROVIDER`. Para o gateway, defina `ZELDAPDV_AI_GATEWAY_URL`, `ZELDAPDV_AI_GATEWAY_MODEL` e, se necessário, `ZELDAPDV_AI_GATEWAY_API_KEY`. Aponte o URL pela VPN do cliente. Falha do n8n ou gateway privado não envia a conversa para Gemini, salvo `ZELDAPDV_AI_FALLBACK_TO_GEMINI=true`.
+
+`add-client.sh` gera `ZELDAPDV_WEBHOOK_SECRET` e `WAHA_WEBHOOK_HMAC_KEY` distintos para cada cliente. Os outros tokens e endpoints continuam vazios no `.env` inicial; configure apenas o provedor usado. Nunca inclua `.env`/credenciais no Git.
+
 ## Branding por cliente
 
 `--brand-name`, `--brand-description`, `--brand-logo`, `--brand-color`, `--brand-footer`. Sem flags, usa `.env` do repositório; senão, defaults. O branding é embutido no **build** — mudou a marca, refaça `add-client.sh` para o cliente.

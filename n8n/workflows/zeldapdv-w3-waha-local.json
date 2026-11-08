@@ -36,7 +36,7 @@
         400
       ],
       "parameters": {
-        "jsCode": "const root = $json || {};\nconst b = (root.body && typeof root.body === 'object') ? root.body : root;\nconst payload = (b.payload && typeof b.payload === 'object') ? Object.assign({}, b, b.payload) : b;\nconst rawChatId = String(payload.chatId || payload.chat_id || payload.from || payload.to || b.chatId || '');\nconst phone = String(payload.phone || payload.from || rawChatId || '').replace(/@(c\\.us|lid)$/i, '').trim();\nconst text = String(payload.text || payload.body || payload.message || '').trim();\nconst name = String(payload.pushName || payload.customer_name || payload.customerName || payload.notifyName || '');\nconst channel = String(payload.channel || (rawChatId.endsWith('@lid') ? 'cloud_api' : 'waha'));\nreturn [{ json: { phone: phone, text: text, name: name, chatId: rawChatId, channel: channel } }];"
+        "jsCode": "const root = $json || {};\nconst b = (root.body && typeof root.body === 'object') ? root.body : root;\nconst payload = (b.payload && typeof b.payload === 'object') ? Object.assign({}, b, b.payload) : b;\nconst rawChatId = String(payload.chatId || payload.chat_id || payload.from || payload.to || b.chatId || '');\nconst phone = String(payload.phone || payload.from || rawChatId || '').replace(/@(c\\.us|lid)$/i, '').trim();\nconst text = String(payload.text || payload.body || payload.message || '').trim();\nconst name = String(payload.pushName || payload.customer_name || payload.customerName || payload.notifyName || '');\nconst channel = String(payload.channel || (rawChatId.endsWith('@lid') ? 'cloud_api' : 'waha'));\nconst eventId = String(payload.id && payload.id._serialized || payload.id || payload._data && payload._data.id && payload._data.id._serialized || '');\nreturn [{ json: { phone: phone, text: text, name: name, chatId: rawChatId, channel: channel, eventId: eventId } }];"
       }
     },
     {
@@ -463,7 +463,7 @@
         "options": {},
         "sendBody": true,
         "bodyType": "json",
-        "body": "={{ JSON.stringify({ channel: \"waha\", payload: { from: $('Extrair Dados').first().json.phone, body: $('Extrair Dados').first().json.text, pushName: $('Extrair Dados').first().json.name } }) }}"
+        "body": "={{ JSON.stringify({ channel: \"waha\", defer_reply: true, event_id: $('Extrair Dados').first().json.eventId, payload: { from: $('Extrair Dados').first().json.phone, body: $('Extrair Dados').first().json.text, pushName: $('Extrair Dados').first().json.name } }) }}"
       }
     },
     {

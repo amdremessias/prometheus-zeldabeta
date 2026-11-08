@@ -1,54 +1,79 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { after, NextRequest, NextResponse } from 'next/server';
+import { getWhatsAppIntegrationSettings } from '@/lib/server/atendimento';
+import { verifyMetaWebhook } from '@/lib/server/webhookSignatures';
 
-const META_VERIFY_TOKEN = process.env.WHATSAPP_CLOUD_VERIFY_TOKEN || '';
-const AI_SECRET = process.env.ZELDAPDV_WEBHOOK_SECRET || process.env.CRM_WEBHOOK_SECRET || '';
-const META_AI_WEBHOOK_URL =
-  process.env.ZELDAPDV_META_AI_WEBHOOK_URL || 'http://n8n-zeldapdv:5678/webhook/zeldapdv-meta-cloud';
+export const runtime = 'nodejs';
+
+const verifyToken = () => process.env.WHATSAPP_CLOUD_VERIFY_TOKEN || process.env.META_WA_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || '';
+const appSecret = () => process.env.WHATSAPP_CLOUD_APP_SECRET || process.env.META_WA_APP_SECRET || process.env.META_APP_SECRET || '';
 
 export async function GET(req: NextRequest) {
   const u = new URL(req.url);
-  if (u.searchParams.get('hub.mode') === 'subscribe' && u.searchParams.get('hub.verify_token') === META_VERIFY_TOKEN) {
-    return new NextResponse(u.searchParams.get('hub.challenge') || '');
+  const expected = verifyToken();
+  if (expected && u.searchParams.get('hub.mode') === 'subscribe' && u.searchParams.get('hub.verify_token') === expected) {
+    return new NextResponse(u.searchParams.get('hub.challenge') || '', { status: 200 });
   }
   return NextResponse.json({ ok: false }, { status: 403 });
 }
 
-async function forwardToN8n(from: string, text: string, name: string) {
-  const payload = { payload: { from, body: text, pushName: name, channel: 'cloud_api' } };
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
-  try {
-    await fetch(META_AI_WEBHOOK_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-zeldapdv-secret': AI_SECRET },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-  } catch {
-    // Falha no encaminhamento não deve quebrar a resposta à Meta (evita retry em loop).
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-export async function POST(req: NextRequest) {
-  const body = await req.json().catch(() => ({}));
-  const entry = Array.isArray(body?.entry) ? body.entry : [];
-  for (const e of entry) {
-    for (const change of e?.changes || []) {
+function parseMessages(body: any) {
+  const messages: { id: string; from: string; name: string; text: string }[] = [];
+  for (const entry of Array.isArray(body?.entry) ? body.entry : []) {
+    for (const change of Array.isArray(entry?.changes) ? entry.changes : []) {
       const value = change?.value || {};
-      if (!Array.isArray(value?.messages)) continue;
-      const contacts = Array.isArray(value?.contacts) ? value.contacts : [];
-      for (const msg of value.messages) {
-        if (msg?.type !== 'text') continue;
-        const from = String(msg?.from || '').trim();
-        const text = String(msg?.text?.body || '').trim();
-        if (!from || !text) continue;
-        const contact = contacts.find((c: any) => String(c?.wa_id) === from);
-        const name = contact?.profile?.name ? String(contact.profile.name) : '';
-        await forwardToN8n(from, text, name);
+      const contacts = Array.isArray(value.contacts) ? value.contacts : [];
+      for (const message of Array.isArray(value.messages) ? value.messages : []) {
+        const from = String(message?.from || '').replace(/\D/g, '');
+        const id = String(message?.id || '').trim();
+        const text = message?.type === 'text'
+          ? String(message?.text?.body || '').trim()
+          : message?.type === 'interactive'
+            ? String(message?.interactive?.button_reply?.title || message?.interactive?.list_reply?.title || '').trim()
+            : '';
+        if (!from || !id || !text) continue;
+        const contact = contacts.find((item: any) => String(item?.wa_id || '').replace(/\D/g, '') === from);
+        messages.push({ id, from, name: String(contact?.profile?.name || ''), text });
       }
     }
   }
-  return NextResponse.json({ ok: true, received: true });
+  return messages;
+}
+
+export async function POST(req: NextRequest) {
+  const raw = await req.text();
+  const secret = appSecret();
+  if (!secret) return NextResponse.json({ error: 'App Secret da Meta não configurado' }, { status: 503 });
+  if (!verifyMetaWebhook(raw, req.headers.get('x-hub-signature-256'), secret)) {
+    return NextResponse.json({ error: 'Assinatura Meta inválida' }, { status: 401 });
+  }
+  let body: any;
+  try { body = JSON.parse(raw); } catch { return NextResponse.json({ error: 'JSON inválido' }, { status: 400 }); }
+
+  const settings = await getWhatsAppIntegrationSettings();
+  if (!settings.enabled || settings.provider !== 'meta') return NextResponse.json({ ok: true, received: true, ignored: 'provider_disabled' });
+  const sharedSecret = process.env.ZELDAPDV_WEBHOOK_SECRET || process.env.CRM_WEBHOOK_SECRET || '';
+  if (!sharedSecret) return NextResponse.json({ error: 'ZELDAPDV_WEBHOOK_SECRET não configurado' }, { status: 503 });
+  const messages = parseMessages(body);
+  const baseUrl = String(process.env.ZELDAPDV_INTERNAL_URL || 'http://127.0.0.1:3000').replace(/\/$/, '');
+
+  after(async () => {
+    for (const message of messages) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), Number(process.env.ZELDAPDV_INBOUND_TIMEOUT_MS || 55000));
+      try {
+        const response = await fetch(baseUrl + '/api/whatsapp/inbound', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-zeldapdv-secret': sharedSecret },
+          body: JSON.stringify({ channel: 'cloud_api', event_id: message.id, phone: message.from, text: message.text, name: message.name, customer_name: message.name, chatId: message.from }),
+          signal: controller.signal,
+        });
+        if (!response.ok) console.error('[whatsapp:meta] CRM interno retornou HTTP ' + response.status);
+      } catch {
+        console.error('[whatsapp:meta] falha ao encaminhar evento ao CRM interno');
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  });
+  return NextResponse.json({ ok: true, received: true, accepted: messages.length });
 }

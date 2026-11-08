@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ensureSchema, pool } from '@/lib/server/db';
 import { getSessionUser } from '@/lib/server/session';
-import { appendChatMessage, getChatMessages } from '@/lib/server/atendimento';
+import { appendChatMessage, getChatMessages, sendWhatsAppMessageTo, getWhatsAppIntegrationSettings } from '@/lib/server/atendimento';
 
 export async function GET(_req: NextRequest, context: { params: Promise<{ id: string }> }) {
   const user = await getSessionUser();
@@ -33,22 +33,19 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   const metadata = chat.metadata && typeof chat.metadata === 'object' ? chat.metadata : {};
   const contextData = metadata.context && typeof metadata.context === 'object' ? metadata.context : {};
   const rawChatId = String(contextData.lastChatId ?? metadata.chat_id ?? metadata.chatId ?? chat.phone).trim();
-  const chatTarget = rawChatId.includes('@') ? rawChatId : `${chat.phone}@c.us`;
-  const wahaUrl = String(process.env.WAHA_API_URL ?? 'http://waha-zeldapdv:3000').replace(/\/$/, '');
-  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Api-Key': String(process.env.WAHA_API_KEY ?? '') };
-  if (process.env.WAHA_API_KEY) headers['X-Api-Key'] = process.env.WAHA_API_KEY;
-  let response: Response;
+  const integration = await getWhatsAppIntegrationSettings();
+  const provider = integration.provider;
+  const chatTarget = provider === 'meta' ? String(chat.phone) : rawChatId.includes('@') ? rawChatId : String(chat.phone) + '@c.us';
+  let delivery: { provider: string; messageId?: string };
   try {
-    response = await fetch(`${wahaUrl}/api/sendText`, { method: 'POST', headers, body: JSON.stringify({ session: process.env.WAHA_SESSION ?? 'session_zeldapdv', chatId: chatTarget, text }) });
+    delivery = await sendWhatsAppMessageTo(provider, chatTarget, text);
   } catch (error) {
-    return NextResponse.json({ error: 'Falha de comunicação com o WAHA', details: String(error) }, { status: 502 });
+    return NextResponse.json({ error: 'Falha no envio pelo provedor WhatsApp ativo', details: error instanceof Error ? error.message : String(error) }, { status: 502 });
   }
-  const responseText = await response.text();
-  if (!response.ok) return NextResponse.json({ error: 'WAHA não enviou a mensagem', details: responseText }, { status: 502 });
 const nextMetadata = { ...metadata, last_human_message: text, last_human_user_id: user.id, last_human_sent_at: new Date().toISOString(), context: { ...contextData, lastChatId: chatTarget, lastMessage: text } };
   await appendChatMessage(chatId, { direction: 'outbound', senderType: 'human', text, metadata: { user_id: user.id } });
   const updated = await pool.query('UPDATE chat_wpp SET last_message=$2, updated_at=now(), metadata=$3::jsonb, status=CASE WHEN status=$4 THEN $5 ELSE status END WHERE id=$1 RETURNING *', [chatId, text, JSON.stringify(nextMetadata), 'aberto', 'assumido']);
-  return NextResponse.json({ ok: true, chat: updated.rows[0], waha: responseText ? JSON.parse(responseText) : null });
+  return NextResponse.json({ ok: true, chat: updated.rows[0], delivery });
 }
 
 

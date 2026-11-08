@@ -52,6 +52,15 @@ Construído com arquitetura *client-side*, o sistema prioriza alta disponibilida
 
 ---
 
+## WhatsApp e IA por instância
+
+O atendimento permite selecionar WAHA ou WhatsApp Business Cloud API e escolher n8n, Gemini ou um gateway OpenAI-compatible para o agente. Use `Configurações → Integrações` para escolher o provedor e ativar o atendimento. Segredos e endpoints ficam no `.env` da própria instância; veja `deploy/whatsapp-ai.env.example` para os nomes das variáveis.
+
+- WAHA recebe em `/api/integrations/whatsapp/waha/webhook` com HMAC SHA-512 (`WAHA_WEBHOOK_HMAC_KEY`).
+- Meta Cloud recebe em `/api/integrations/whatsapp/official/webhook`, valida o verify token no GET e `X-Hub-Signature-256` no POST.
+- O gateway LLM usa Chat Completions compatível com OpenAI. Configure `ZELDAPDV_AI_GATEWAY_URL`, modelo e, se necessário, chave. Falha de n8n ou gateway privado não envia dados para Gemini automaticamente; o fallback só ocorre com `ZELDAPDV_AI_FALLBACK_TO_GEMINI=true`.
+- Em multi-cliente, cada app, banco, segredo, WAHA e gateway deve ser dedicado àquele cliente. Nenhuma instância compartilha conversas ou configurações com outra.
+
 ## 💻 Execução Local
 
 ### Pré-requisitos
