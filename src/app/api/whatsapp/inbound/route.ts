@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { pool, createPedidoWeb, upsertClienteWhatsapp } from '@/lib/server/db';
 import { loadAppMenu, MenuPublico } from '@/lib/server/cardapioDigital';
-import { openOrUpdateChatWpp, appendChatMessage, sendWahaMessageTo } from '@/lib/server/atendimento';
-import { geminiEnabled, GeminiDecision } from '@/lib/server/gemini';
+import { openOrUpdateChatWpp, appendChatMessage, sendWhatsAppMessageTo, getWhatsAppIntegrationSettings } from '@/lib/server/atendimento';
+import { GeminiDecision } from '@/lib/server/gemini';
 import { interpretWithFallback } from '@/lib/server/aiClient';
 
 const getSecret = () => process.env.ZELDAPDV_WEBHOOK_SECRET || process.env.CRM_WEBHOOK_SECRET || '';
@@ -20,8 +20,9 @@ function extractEvent(body: any) {
   const chatId = lid || rawChatId;
   const phone = String(body?.phone || source?.phone || rawChatId || chatId).replace(/@(c\.us|lid)$/i, '').trim();
   const text = String(body?.text || source?.text || source?.message || source?.body || '').trim();
-  const eventId = String(body?.event_id || body?.eventId || eventBody?.id || body?.id || `${phone}:${Date.now()}`);
-  return { phone, text, eventId, chatId, lid };
+  const eventId = String(body?.event_id || body?.eventId || source?.id?._serialized || source?.id || eventBody?.id || body?.id || `${phone}:${Date.now()}`);
+  const name = String(body?.customer_name || body?.name || source?.pushName || '').trim();
+  return { phone, text, eventId, chatId, lid, name };
 }
 
 async function ensureSchema() {
@@ -107,15 +108,20 @@ function resumoCarrinho(carrinho: any) {
 export async function POST(req: NextRequest) {
   const expected = getSecret();
   const supplied = req.headers.get('x-zeldapdv-secret') ?? req.headers.get('x-crm-webhook-secret') ?? req.headers.get('x-wpp-inbound-token') ?? '';
-  // WAHA (rede interna docker) não envia o header; exige secret apenas quando informado e divergente.
-  if (expected && supplied && supplied !== expected) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+  if (!expected && process.env.NODE_ENV === 'production') return NextResponse.json({ error: 'Webhook secret não configurado' }, { status: 503 });
+  if (expected && supplied !== expected) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
-  const { phone, text, eventId, chatId, lid } = extractEvent(body);
+  if (body?.fromMe === true || body?.payload?.fromMe === true) return NextResponse.json({ ok: true, ignored: 'outgoing_echo' });
+  const { phone, text, eventId, chatId, lid, name } = extractEvent(body);
   const channel = body?.channel === 'cloud_api' ? 'cloud_api' : 'waha';
   if (!phone || !text) return NextResponse.json({ error: 'phone e text são obrigatórios' }, { status: 400 });
 
   await ensureSchema();
+  const integration = await getWhatsAppIntegrationSettings();
+  if (!integration.enabled) return NextResponse.json({ ok: true, ignored: 'integration_disabled', text: '' });
+  const activeChannel = integration.provider === 'meta' ? 'cloud_api' : 'waha';
+  if (channel !== activeChannel) return NextResponse.json({ ok: true, ignored: 'provider_mismatch', text: '' });
   const inserted = await pool.query(
     `INSERT INTO whatsapp_inbound_events(event_id, phone, payload) VALUES ($1, $2, $3::jsonb) ON CONFLICT DO NOTHING RETURNING event_id`,
     [eventId, phone, JSON.stringify(body)],
@@ -125,6 +131,7 @@ export async function POST(req: NextRequest) {
   const currentResult = await pool.query('SELECT state, context, human_active FROM whatsapp_sessions WHERE phone = $1', [phone]);
   const current = currentResult.rows[0];
   const context: Record<string, unknown> = { ...(current?.context || {}), lastText: text, lastChatId: chatId, waha_lid: lid || undefined, lastEventId: eventId };
+  if (name && !context.cliente_nome) context.cliente_nome = name;
   let state = String(current?.state || 'MENU');
   let human = Boolean(current?.human_active);
   const wasHuman = human;
@@ -151,7 +158,7 @@ if (human) {
     reply = '';
   } else if (state === 'MENU') {
     /* Agente IA: entende linguagem natural além dos atalhos numéricos da FSM. */
-    const ai = geminiEnabled && menu
+    const ai = menu
       ? await interpretWithFallback({
           text,
           menu,
@@ -227,7 +234,7 @@ if (human) {
   } else if (state === 'TIPO_ENTREGA') {
     /* Agente IA: aceita respostas naturais como "quero entrega no endereço". */
     let aiTipo: GeminiDecision | null = null;
-    if (geminiEnabled && menu && !value.includes('entrega') && !value.includes('retirada') && !value.includes('delivery') && !value.includes('balcao') && !value.includes('local')) {
+    if (menu && !value.includes('entrega') && !value.includes('retirada') && !value.includes('delivery') && !value.includes('balcao') && !value.includes('local')) {
       aiTipo = await interpretWithFallback({
         text,
         menu,
@@ -271,7 +278,7 @@ if (human) {
     const itens = parseItens(text);
     /* Agente IA: entende pedidos em linguagem natural ("2 hambúrgueres e 1 coca"). */
     let aiItens: GeminiDecision | null = null;
-    if (itens.length === 0 && geminiEnabled && menu) {
+    if (itens.length === 0 && menu) {
       aiItens = await interpretWithFallback({
         text,
         menu,
@@ -433,8 +440,9 @@ if (human) {
 
   /* O CRM é quem efetivamente envia a resposta ao cliente via WAHA
      (padrão teknos: n8n orquestra a IA, CRM executa o envio). */
-  if (reply) {
-    await sendWahaMessageTo(chatId || phone, reply).catch(() => undefined);
+  const replyIsSentByCrm = body?.defer_reply !== true;
+  if (reply && replyIsSentByCrm) {
+    await sendWhatsAppMessageTo(channel, chatId || phone, reply).catch((error) => console.error('[whatsapp:outbound]', error));
   }
 
   /* Histórico E2E do ticket: a automação e o cliente ficam registrados e são
@@ -443,7 +451,7 @@ if (human) {
   const historyRaw = Array.isArray(context.history) ? (context.history as { sender: 'customer' | 'automation'; text: string }[]) : [];
   const history = [...historyRaw];
   if (text) history.push({ sender: 'customer', text });
-  if (reply) history.push({ sender: 'automation', text: reply });
+  if (reply && replyIsSentByCrm) history.push({ sender: 'automation', text: reply });
 
   if (true) {
     try {

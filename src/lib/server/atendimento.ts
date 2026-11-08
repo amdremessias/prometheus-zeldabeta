@@ -218,6 +218,18 @@ export async function finalizeChatWpp(chatId: number, userId: number | null) {
 
 export { cleanPhone, makeTicket };
 
+export async function getWhatsAppIntegrationSettings(): Promise<{ enabled: boolean; provider: 'waha' | 'meta' }> {
+    const envProvider = ['meta', 'cloud_api'].includes(String(process.env.WHATSAPP_PROVIDER || '').toLowerCase()) ? 'meta' : 'waha';
+    try {
+        await ensureSchema();
+        const result = await pool.query('SELECT data FROM app_state WHERE id = $1', [1]);
+        const config = result.rows[0]?.data?.integrations?.whatsapp || {};
+        return { enabled: config.enabled === true, provider: config.provider === 'meta' || config.provider === 'waha' ? config.provider : envProvider };
+    } catch {
+        return { enabled: false, provider: envProvider };
+    }
+}
+
 export async function sendWahaMessage(phone: string, text: string): Promise<void> {
   const clean = phone.replace(/@(c\.us|lid)$/i, '').trim();
   if (!clean) return;
@@ -231,13 +243,36 @@ export async function sendWahaMessageTo(chatId: string, text: string): Promise<v
   if (!target || !text) return;
   const wahaUrl = String(process.env.WAHA_API_URL ?? 'http://waha-zeldapdv:3000').replace(/\/$/, '');
   const apiKey = String(process.env.WAHA_API_KEY ?? '');
-  try {
-    await fetch(`${wahaUrl}/api/sendText`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(apiKey ? { 'X-Api-Key': apiKey } : {}) },
-      body: JSON.stringify({ session: process.env.WAHA_SESSION ?? 'session_zeldapdv', chatId: target, text }),
-    });
-  } catch {
-    // Falha silenciosa — não bloqueia o fluxo de atendimento
+  const response = await fetch(wahaUrl + '/api/sendText', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(apiKey ? { 'X-Api-Key': apiKey } : {}) },
+    body: JSON.stringify({ session: process.env.WAHA_SESSION ?? 'session_zeldapdv', chatId: target, text }),
+  });
+  if (!response.ok) throw new Error('WAHA sendText HTTP ' + response.status);
+}
+
+export async function sendMetaCloudMessageTo(target: string, text: string): Promise<{ messageId?: string }> {
+  const phoneNumberId = process.env.WHATSAPP_CLOUD_PHONE_ID || process.env.META_WA_PHONE_NUMBER_ID || process.env.META_PHONE_ID || '';
+  const accessToken = process.env.WHATSAPP_CLOUD_ACCESS_TOKEN || process.env.META_WA_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || '';
+  if (!phoneNumberId || !accessToken) throw new Error('WhatsApp Cloud API não configurada');
+  const phone = String(target || '').split('@')[0].replace(/\D/g, '');
+  if (!phone) throw new Error('Número de destino inválido');
+  const version = String(process.env.WHATSAPP_CLOUD_GRAPH_VERSION || process.env.META_WA_GRAPH_VERSION || process.env.META_GRAPH_VERSION || 'v20.0').replace(/^v?/, 'v');
+  const response = await fetch('https://graph.facebook.com/' + version + '/' + phoneNumberId + '/messages', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messaging_product: 'whatsapp', to: phone, type: 'text', text: { body: text } }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error('WhatsApp Cloud API HTTP ' + response.status);
+  return { messageId: data?.messages?.[0]?.id };
+}
+
+export async function sendWhatsAppMessageTo(provider: 'waha' | 'meta' | 'cloud_api', target: string, text: string): Promise<{ provider: string; messageId?: string }> {
+  if (provider === 'meta' || provider === 'cloud_api') {
+    const result = await sendMetaCloudMessageTo(target, text);
+    return { provider: 'meta', messageId: result.messageId };
   }
+  await sendWahaMessageTo(target, text);
+  return { provider: 'waha' };
 }

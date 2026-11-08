@@ -9,6 +9,7 @@ import { CardapioDigitalSettings } from './SettingsCardapioDigital';
 import { BackupSettings } from './SettingsBackup';
 import { SettingsBranding } from './SettingsBranding';
 import { SettingsFiscal } from './SettingsFiscal';
+import { SettingsIntegrations } from './SettingsIntegrations';
 import { SettingsImportProdutos } from './SettingsImportProdutos';
 import { useAuthStore } from '@/store/authStore';
 import { can } from '@/lib/permissions';
@@ -16,6 +17,7 @@ import { can } from '@/lib/permissions';
 export function SettingsTabs() {
     const role = useAuthStore((state) => state.user?.role);
     const showFiscal = can(role, 'fiscal');
+    const showIntegrations = can(role, 'integracoes');
     return (
         <Tabs defaultValue="general" className="w-full">
             <TabsList className="mb-4 flex gap-2 overflow-x-auto pb-1 flex-nowrap">
@@ -29,6 +31,7 @@ export function SettingsTabs() {
                 <TabsTrigger className="shrink-0 whitespace-nowrap" value="estastistica">Estastistica</TabsTrigger>
                 <TabsTrigger className="shrink-0 whitespace-nowrap" value="marca">Marca</TabsTrigger>
                 <TabsTrigger className="shrink-0 whitespace-nowrap" value="backup">Backup</TabsTrigger>
+                {showIntegrations && <TabsTrigger className="shrink-0 whitespace-nowrap" value="integracoes">Integrações</TabsTrigger>}
                 {showFiscal && (
                     <TabsTrigger className="shrink-0 whitespace-nowrap" value="fiscal">Fiscal</TabsTrigger>
                 )}
@@ -105,6 +108,12 @@ export function SettingsTabs() {
                     </CardContent>
                 </Card>
             </TabsContent>
+
+            {showIntegrations && (
+                <TabsContent value="integracoes">
+                    <Card><CardContent className="p-4"><SettingsIntegrations /></CardContent></Card>
+                </TabsContent>
+            )}
 
             <TabsContent value="marca">
                 <Card>

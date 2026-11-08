@@ -8,7 +8,7 @@
 #    crm  -> waha       via http://waha-zeldapdv:3000
 #    n8n  -> crm        via http://crm-zeldapdv:3000
 #    n8n  -> waha       via http://waha-zeldapdv:3000
-#    waha -> n8n        via http://n8n-zeldapdv:5678 (webhook)
+#    waha -> crm        via http://crm-zeldapdv:3000/api/integrations/whatsapp/waha/webhook
 # ============================================================================
 
 name: restaurante-tech-main-zeldapdv
@@ -62,6 +62,14 @@ services:
       WAHA_API_URL: http://waha-zeldapdv:3000
       WAHA_API_KEY: ${WAHA_API_KEY}
       WAHA_SESSION: ${WAHA_SESSION:-session_zeldapdv}
+      WAHA_WEBHOOK_HMAC_KEY: ${WAHA_WEBHOOK_HMAC_KEY:-${ZELDAPDV_WEBHOOK_SECRET}}
+      WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-waha}
+      WHATSAPP_CLOUD_PHONE_ID: ${WHATSAPP_CLOUD_PHONE_ID:-${META_PHONE_ID:-}}
+      WHATSAPP_CLOUD_ACCESS_TOKEN: ${WHATSAPP_CLOUD_ACCESS_TOKEN:-${META_ACCESS_TOKEN:-}}
+      WHATSAPP_CLOUD_VERIFY_TOKEN: ${WHATSAPP_CLOUD_VERIFY_TOKEN:-${META_VERIFY_TOKEN:-}}
+      WHATSAPP_CLOUD_APP_SECRET: ${WHATSAPP_CLOUD_APP_SECRET:-${META_APP_SECRET:-}}
+      WHATSAPP_CLOUD_GRAPH_VERSION: ${WHATSAPP_CLOUD_GRAPH_VERSION:-v20.0}
+      ZELDAPDV_INTERNAL_URL: http://127.0.0.1:3000
       # Agente IA de autoatendimento (Gemini) — fallback local se o n8n estiver indisponível
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
@@ -69,8 +77,14 @@ services:
       GEMINI_MAX_ATTEMPTS: ${GEMINI_MAX_ATTEMPTS:-2}
       # Agente IA hospedado no n8n (padrão teknos: a IA vive no n8n, o CRM a aciona)
       ZELDAPDV_WEBHOOK_SECRET: ${ZELDAPDV_WEBHOOK_SECRET}
-      ZELDAPDV_AI_WEBHOOK_URL: http://n8n-zeldapdv:5678/webhook/zeldapdv-gemini
-      ZELDAPDV_AI_TIMEOUT_MS: 20000
+      ZELDAPDV_AI_PROVIDER: ${ZELDAPDV_AI_PROVIDER:-n8n}
+      ZELDAPDV_AI_WEBHOOK_URL: ${ZELDAPDV_AI_WEBHOOK_URL:-http://n8n-zeldapdv:5678/webhook/zeldapdv-gemini}
+      ZELDAPDV_AI_TIMEOUT_MS: ${ZELDAPDV_AI_TIMEOUT_MS:-20000}
+      ZELDAPDV_AI_GATEWAY_URL: ${ZELDAPDV_AI_GATEWAY_URL:-}
+      ZELDAPDV_AI_GATEWAY_API_KEY: ${ZELDAPDV_AI_GATEWAY_API_KEY:-}
+      ZELDAPDV_AI_GATEWAY_MODEL: ${ZELDAPDV_AI_GATEWAY_MODEL:-default}
+      ZELDAPDV_AI_GATEWAY_TIMEOUT_MS: ${ZELDAPDV_AI_GATEWAY_TIMEOUT_MS:-30000}
+      ZELDAPDV_AI_FALLBACK_TO_GEMINI: ${ZELDAPDV_AI_FALLBACK_TO_GEMINI:-false}
       # Licenciamento (JWT Ed25519 / EdDSA) — DESLIGADO por padrão (sem chave pública).
       LICENSE_CLIENT_ID: ${LICENSE_CLIENT_ID:-zelda-core}
       LICENSE_DOMAIN: ${LICENSE_DOMAIN:-localhost}
@@ -99,8 +113,9 @@ services:
       # no glibc da VPS: força o uso do binário embutido em vez do libvips do sistema.
       SHARP_IGNORE_GLOBAL_LIBVIPS: "1"
       # Integração interna: WAHA -> CRM (dispatcher; o CRM aciona o n8n para a IA)
-      WHATSAPP_HOOK_URL: ${WHATSAPP_HOOK_URL:-http://n8n-zeldapdv:5678/webhook/zeldapdv-waha-cloud}
+      WHATSAPP_HOOK_URL: ${WHATSAPP_HOOK_URL:-http://crm-zeldapdv:3000/api/integrations/whatsapp/waha/webhook}
       WHATSAPP_HOOK_EVENTS: message
+      WHATSAPP_HOOK_HMAC_KEY: ${WAHA_WEBHOOK_HMAC_KEY:-${ZELDAPDV_WEBHOOK_SECRET}}
       WAHA_BASE_URL: http://waha-zeldapdv:3000
     ports:
       - "3012:3000"
